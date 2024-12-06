@@ -261,10 +261,10 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
                 e("mov rax, [rsp]")
                 e("push rax")
             case TokenType.SWP:
-                a = type_stack.pop()
-                b = type_stack.pop()
-                type_stack.append(a)
-                type_stack.append(b)
+                assert len(type_stack) >= 2, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
+                takes = type_stack[-2:]
+                gives = [takes[1], takes[0]]
+                t(takes, gives)
                 e("pop rax")
                 e("pop rbx")
                 e("push rax")
@@ -280,6 +280,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
                 e("movzx rax, al")
                 e("push rax")
             case TokenType.PRINT:
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
                 match type_stack[-1]:
                     case PillowType.INT:
                         t([PillowType.INT], [])
@@ -292,6 +293,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
                     case _:
                         assert False, f"Print expected int or str, found {type_stack[-1]}"
             case TokenType.PRINTLN:
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
                 match type_stack[-1]:
                     case PillowType.INT:
                         t([PillowType.INT], [])
