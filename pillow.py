@@ -10,6 +10,7 @@ import os
 class TokenType(Enum):
     INTEGER = auto()
     STRING = auto()
+    NAME = auto()
     ADD = auto()
     SUB = auto()
     MUL = auto()
@@ -21,6 +22,11 @@ class TokenType(Enum):
     SWP = auto()
     NOT = auto()
     POP = auto()
+    PROC = auto()
+    INT_TYPE = auto()
+    STR_TYPE = auto()
+    ARROW = auto()
+    DO = auto()
     PRINT = auto()
     PRINTLN = auto()
     IF = auto()
@@ -62,6 +68,14 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "!": return Token(TokenType.NOT)
     if tok == "print": return Token(TokenType.PRINT)
     if tok == "println": return Token(TokenType.PRINTLN)
+    if tok == "int": return Token(TokenType.INT_TYPE)
+    if tok == "str": return Token(TokenType.STR_TYPE)
+    if tok == "->": return Token(TokenType.ARROW)
+    if tok == "do": return Token(TokenType.DO)
+    if tok == "proc":
+        token = Token(TokenType.PROC)
+        block_stack.append((i, token))
+        return token
     if tok == "if":
         token = Token(TokenType.IF)
         block_stack.append((i, token))
@@ -83,7 +97,7 @@ def lex_token(tok: str, i: int) -> Token:
         opening_i, opening_tok = block_stack.pop()
         opening_tok.value = i
         return Token(TokenType.END, opening_i)
-    raise ValueError(f"Unexpected token {tok}")
+    return Token(TokenType.NAME, tok)
 
 def lex(code: str) -> list[Token]:
     tokens: list[Token] = []
@@ -111,13 +125,41 @@ def lex(code: str) -> list[Token]:
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
     return tokens
 
+class Procedure():
+    def __init__(self, name: str, takes: list[PillowType], gives: list[PillowType], code: list[Token]):
+        self.name = name
+        self.takes = takes
+        self.gives = gives
+        self.code = code
+    
+    def emit(self) -> str:
+        output = ""
+        def e(x: str) -> None:
+            nonlocal output
+            output += x + "\n"
+        
+        assembly, exit_stack = emit(self.code, None, self.takes.copy())
+        assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
+
+        e("proc_" + self.name + ":")
+        e("pop r12")
+        e(assembly)
+        e("push r12")
+        e("ret")
+
+        return output
+
+    def __repr__(self) -> str:
+        return f"{self.name} {self.takes} -> {self.gives}"
+
 class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[Token], target: Target) -> str:
+def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] = []) -> tuple[str, list[PillowType]]:
     output = ""
     data_section = ""
+    procedures: list[Procedure] = []
 
     def e(x: str) -> None:
         nonlocal output
@@ -126,8 +168,6 @@ def emit(code: list[Token], target: Target) -> str:
     def d(x: str) -> None:
         nonlocal data_section
         data_section += x + "\n"
-
-    type_stack: list[PillowType] = []
 
     def type_stack_op(tok: Token, takes: list[PillowType], gives: list[PillowType]) -> None:
         nonlocal type_stack
@@ -145,6 +185,8 @@ def emit(code: list[Token], target: Target) -> str:
             e("extrn printf")
             e("section '.text' executable")
 
+            e("main:")
+
         case Target.WINDOWS:
             e("format PE64")
             e("entry main")
@@ -152,11 +194,14 @@ def emit(code: list[Token], target: Target) -> str:
             e("include 'win64a.inc'")
             e("section '.text' code executable")
 
-    e("main:")
+            e("main:")
+
 
     block_type_stack: list[list[PillowType]] = []
 
-    for i, tok in enumerate(code):
+    code_iter = iter(enumerate(code))
+
+    for i, tok in code_iter:
 
         def t(takes: list[PillowType], gives: list[PillowType]) -> None:
             type_stack_op(tok, takes, gives)
@@ -259,6 +304,44 @@ def emit(code: list[Token], target: Target) -> str:
                     case _:
                         assert False, f"Println expected int or str, found {type_stack[-1]}"
                 e("call print_ln")
+            case TokenType.NAME:
+                assert target is not None, "Cannot call prodedure from a procedure"
+                assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
+                procedure = next(x for x in procedures if x.name == tok.value)
+                t(procedure.takes, procedure.gives)
+                e("call proc_" + tok.value)
+            case TokenType.PROC:
+                _, proc_name = next(code_iter)
+                assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
+                takes_type = None
+                takes_types: list[PillowType] = []
+                while True:
+                    _, takes_type = next(code_iter)
+                    match takes_type.token_type:
+                        case TokenType.INT_TYPE:
+                            takes_types.append(PillowType.INT)
+                        case TokenType.STR_TYPE:
+                            takes_types.append(PillowType.STR)
+                        case TokenType.ARROW:
+                            break
+                        case _:
+                            assert False, f"Expected type or arrow but found {takes_type}"
+                gives_type = None
+                gives_types: list[PillowType] = []
+                do_i = 0
+                while True:
+                    do_i, gives_type = next(code_iter)
+                    match gives_type.token_type:
+                        case TokenType.INT_TYPE:
+                            gives_types.append(PillowType.INT)
+                        case TokenType.STR_TYPE:
+                            gives_types.append(PillowType.STR)
+                        case TokenType.DO:
+                            break
+                        case _:
+                            assert False, f"Expected type or do but found {gives_type}"
+                procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                while do_i < tok.value: do_i, _ = next(code_iter)
             case TokenType.IF:
                 t([PillowType.INT], [])
                 block_type_stack.append(type_stack.copy())
@@ -291,7 +374,6 @@ def emit(code: list[Token], target: Target) -> str:
                 e("label_" + str(i) + ":")
             case _:
                 raise Exception(f"Token type {tok.token_type} not implemented")
-        e("")
 
 
     match target:
@@ -323,6 +405,8 @@ def emit(code: list[Token], target: Target) -> str:
             e("call printf")
             e("add rsp, 32")
             e("ret")
+
+            e("".join(procedure.emit() for procedure in procedures))
 
             e("section '.data' writeable")
             e(data_section)
@@ -357,6 +441,8 @@ def emit(code: list[Token], target: Target) -> str:
             e("add rsp, 32")
             e("ret")
 
+            e("".join(procedure.emit() for procedure in procedures))
+
             e("section '.data' data readable writeable")
             e(data_section)
             e("fmt db \"%d\", 0")
@@ -367,7 +453,7 @@ def emit(code: list[Token], target: Target) -> str:
             e("import kernel32, ExitProcess, 'ExitProcess'")
             e("import msvcrt, printf, 'printf'")
 
-    return output
+    return output, type_stack
 
 def compile(assembly: str, target: Target, output_path: Path) -> None:
     with open(output_path.with_suffix(".s"), "w") as f:
@@ -391,7 +477,8 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        compile(emit(lex(f.read()), target), target, output_file)
+        assembly, _ = emit(lex(f.read()), target)
+        compile(assembly, target, output_file)
 
 
 if __name__ == "__main__":
