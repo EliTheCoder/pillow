@@ -99,11 +99,15 @@ def lex(code: str) -> list[Token]:
                 i += 1
             i += 1
             tokens.append(lex_token(code[start:i], len(tokens)))
-        else:
-            start = i
-            while i < len(code) and not code[i].isspace():
+            continue
+        if code[i] == "#":
+            while i < len(code) and code[i] != "\n":
                 i += 1
-            tokens.append(lex_token(code[start:i], len(tokens)))
+            continue
+        start = i
+        while i < len(code) and not code[i].isspace():
+            i += 1
+        tokens.append(lex_token(code[start:i], len(tokens)))
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
     return tokens
 
