@@ -50,6 +50,9 @@ class PillowType(Enum):
     def __repr__(self) -> str:
         return self.name.lower()
 
+    def __str__(self) -> str:
+        return self.name.lower()
+
 block_stack: list[tuple[int, Token]] = []
 def lex_token(tok: str, i: int) -> Token:
     if tok.isnumeric(): return Token(TokenType.INTEGER, int(tok))
@@ -141,13 +144,16 @@ class Procedure():
         assembly, exit_stack = emit(self.code, None, self.takes.copy())
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
-        e("proc_" + self.name + ":")
+        e(self.proc_name() + ":")
         e("pop r12")
         e(assembly)
         e("push r12")
         e("ret")
 
         return output
+    
+    def proc_name(self) -> str:
+        return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
 
     def __repr__(self) -> str:
         return f"{self.name} {self.takes} -> {self.gives}"
@@ -309,9 +315,10 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             case TokenType.NAME:
                 assert target is not None, "Cannot call prodedure from a procedure"
                 assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
-                procedure = next(x for x in procedures if x.name == tok.value)
+                procedure = next((x for x in procedures if x.name == tok.value and type_stack[-len(x.takes):] == x.takes), None)
+                assert procedure is not None, f"No overload for {tok.value} matches {type_stack}"
                 t(procedure.takes, procedure.gives)
-                e("call proc_" + tok.value)
+                e("call " + procedure.proc_name())
             case TokenType.PROC:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
@@ -320,28 +327,24 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
                 while True:
                     _, takes_type = next(code_iter)
                     match takes_type.token_type:
-                        case TokenType.INT_TYPE:
-                            takes_types.append(PillowType.INT)
-                        case TokenType.STR_TYPE:
-                            takes_types.append(PillowType.STR)
-                        case TokenType.ARROW:
-                            break
-                        case _:
-                            assert False, f"Expected type or arrow but found {takes_type}"
+                        case TokenType.INT_TYPE: takes_types.append(PillowType.INT)
+                        case TokenType.STR_TYPE: takes_types.append(PillowType.STR)
+                        case TokenType.ARROW: break
+                        case _: assert False, f"Expected type or arrow but found {takes_type}"
                 gives_type = None
                 gives_types: list[PillowType] = []
                 do_i = 0
                 while True:
                     do_i, gives_type = next(code_iter)
                     match gives_type.token_type:
-                        case TokenType.INT_TYPE:
-                            gives_types.append(PillowType.INT)
-                        case TokenType.STR_TYPE:
-                            gives_types.append(PillowType.STR)
-                        case TokenType.DO:
-                            break
-                        case _:
-                            assert False, f"Expected type or do but found {gives_type}"
+                        case TokenType.INT_TYPE: gives_types.append(PillowType.INT)
+                        case TokenType.STR_TYPE: gives_types.append(PillowType.STR)
+                        case TokenType.DO: break
+                        case _: assert False, f"Expected type or do but found {gives_type}"
+                already_defined_proc = next((procedure for procedure in procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
+                if already_defined_proc is not None: assert False, f"Procedure {already_defined_proc} is already defined"
+                overload_different_takes = next((procedure for procedure in procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
+                if overload_different_takes is not None: assert False, f"Procedure {overload_different_takes} takes a different number of items"
                 procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
                 while do_i < tok.value: do_i, _ = next(code_iter)
             case TokenType.IF:
