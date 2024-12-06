@@ -1,0 +1,51 @@
+123 print
+
+456 println
+
+2 3 + println
+
+12 10 - println
+
+11 3 * println
+
+11 2 / println
+
+14 3 % println
+
+10 ++ println
+
+10 -- println
+
+444 dup println println
+
+4 ! println
+
+0 ! println
+
+6 7 pop println
+
+5 while --
+    dup println
+end pop
+
+2 if
+    9 println
+end
+
+0 if
+    29 println
+end
+
+61 if
+    62 println
+else
+    63 println
+end
+
+0 if
+    64 println
+else
+    65 println
+end
+
+"strimg cheese" println

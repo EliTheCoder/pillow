@@ -1,0 +1,14 @@
+30 while --
+    dup 30 swp -
+    dup 15 % ! if 
+        "FizzBuzz" println
+    else dup 3 % ! if
+        "Fizz" println
+    else dup 5 % ! if
+        "Buzz" println
+    else
+        dup println
+    end end end
+    pop
+end
+
