@@ -1,0 +1,15 @@
+proc double
+    int -> int
+do
+    2 *
+end
+
+proc double
+    str -> str
+do
+    dup println
+end
+
+
+10 double println
+"b" double println

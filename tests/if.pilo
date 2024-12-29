@@ -1,0 +1,5 @@
+2 3 + if
+    5 println
+else
+    6 println
+end
