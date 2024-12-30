@@ -327,7 +327,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
                 pop("rax")
                 pop("rbx")
-                e("and rax, rbx")
+                e("test rbx, rbx")
+                e("cmovz rax, rbx")
                 push("rax")
             case TokenType.PRINT:
                 assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
