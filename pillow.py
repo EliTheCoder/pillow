@@ -20,6 +20,7 @@ class TokenType(Enum):
     DEC = auto()
     DUP = auto()
     SWP = auto()
+    OVR = auto()
     NOT = auto()
     POP = auto()
     PROC = auto()
@@ -67,6 +68,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "--": return Token(TokenType.DEC)
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
+    if tok == "ovr": return Token(TokenType.OVR)
     if tok == "pop": return Token(TokenType.POP)
     if tok == "!": return Token(TokenType.NOT)
     if tok == "print": return Token(TokenType.PRINT)
@@ -290,6 +292,17 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 pop("rbx")
                 push("rax")
                 push("rbx")
+            case TokenType.OVR:
+                assert len(type_stack) >= 3, f"Instruction {tok} takes 3 items but found {len(type_stack)}"
+                takes = type_stack[-3:]
+                gives = [takes[1], takes[2], takes[0]]
+                t(takes, gives)
+                pop("rax")
+                pop("rbx")
+                pop("rdi")
+                push("rbx")
+                push("rax")
+                push("rdi")
             case TokenType.POP:
                 t([PillowType.INT], [])
                 e("add r12, 8")
