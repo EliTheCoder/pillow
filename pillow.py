@@ -135,7 +135,7 @@ class Procedure():
         self.gives = gives
         self.code = code
     
-    def emit(self) -> str:
+    def emit(self, procedures) -> str:
         output = ""
         def e(x: str) -> None:
             nonlocal output
@@ -149,7 +149,7 @@ class Procedure():
             e("mov " + x + ", [r12]")
             e("add r12, 8")
         
-        assembly, exit_stack = emit(self.code, None, self.takes.copy())
+        assembly, exit_stack = emit(self.code, None, self.takes.copy(), procedures)
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
         e(self.proc_name() + ":")
@@ -168,10 +168,9 @@ class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] = []) -> tuple[str, list[PillowType]]:
+def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Procedure] = []) -> tuple[str, list[PillowType]]:
     output = ""
     data_section = ""
-    procedures: list[Procedure] = []
 
     def e(x: str) -> None:
         nonlocal output
@@ -426,7 +425,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             e("add rsp, 32")
             e("ret")
 
-            e("".join(procedure.emit() for procedure in procedures))
+            e("".join(procedure.emit(procedures) for procedure in procedures))
 
             e("section '.bss' writeable")
             e("pillow_stack rb 4096")
@@ -464,7 +463,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             e("add rsp, 32")
             e("ret")
 
-            e("".join(procedure.emit() for procedure in procedures))
+            e("".join(procedure.emit(procedures) for procedure in procedures))
 
             e("section '.bss' readable writeable")
             e("pillow_stack rb 4096")

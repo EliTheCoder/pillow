@@ -1,11 +1,17 @@
 proc double
-    int int -> int int
+    int -> int
 do
-    2 * swp
-    2 * swp
+    2 *
 end
 
-50 40 double print " " print println
+proc doubledouble
+    int int -> int int
+do
+    double swp
+    double swp
+end
+
+50 40 doubledouble print " " print println
 
 123 print
 
