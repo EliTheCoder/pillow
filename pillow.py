@@ -141,7 +141,7 @@ class Procedure():
         self.gives = gives
         self.code = code
     
-    def emit(self, procedures) -> str:
+    def emit(self, procedures) -> tuple[str, str]:
         output = ""
         def e(x: str) -> None:
             nonlocal output
@@ -155,14 +155,14 @@ class Procedure():
             e("mov " + x + ", [r12]")
             e("add r12, 8")
         
-        assembly, exit_stack = emit(self.code, None, self.takes.copy(), procedures)
+        assembly, exit_stack, data_section = emit(self.code, None, self.takes.copy(), procedures)
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
         e(self.proc_name() + ":")
         e(assembly)
         e("ret")
 
-        return output
+        return output, data_section
     
     def proc_name(self) -> str:
         return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
@@ -174,7 +174,7 @@ class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Procedure] = []) -> tuple[str, list[PillowType]]:
+def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Procedure] = []) -> tuple[str, list[PillowType], str]:
     output = ""
     data_section = ""
 
@@ -454,7 +454,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("add rsp, 32")
             e("ret")
 
-            e("".join(procedure.emit(procedures) for procedure in procedures))
+            for procedure in procedures:
+                proc_code, proc_data = procedure.emit(procedures)
+                e(proc_code)
+                d(proc_data)
 
             e("section '.bss' writeable")
             e("pillow_stack rb 4096")
@@ -492,7 +495,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("add rsp, 32")
             e("ret")
 
-            e("".join(procedure.emit(procedures) for procedure in procedures))
+            for procedure in procedures:
+                proc_code, proc_data = procedure.emit(procedures)
+                e(proc_code)
+                d(proc_data)
 
             e("section '.bss' readable writeable")
             e("pillow_stack rb 4096")
@@ -507,7 +513,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("import kernel32, ExitProcess, 'ExitProcess'")
             e("import msvcrt, printf, 'printf'")
 
-    return output, type_stack
+    return output, type_stack, data_section
 
 def compile(assembly: str, target: Target, output_path: Path) -> None:
     with open(output_path.with_suffix(".s"), "w") as f:
@@ -531,7 +537,7 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        assembly, _ = emit(list(enumerate(lex(f.read()))), target)
+        assembly, _, _ = emit(list(enumerate(lex(f.read()))), target)
         compile(assembly, target, output_file)
 
 
