@@ -129,7 +129,7 @@ def lex(code: str) -> list[Token]:
     return tokens
 
 class Procedure():
-    def __init__(self, name: str, takes: list[PillowType], gives: list[PillowType], code: list[Token]):
+    def __init__(self, name: str, takes: list[PillowType], gives: list[PillowType], code: list[tuple[int, Token]]):
         self.name = name
         self.takes = takes
         self.gives = gives
@@ -168,7 +168,7 @@ class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Procedure] = []) -> tuple[str, list[PillowType]]:
+def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Procedure] = []) -> tuple[str, list[PillowType]]:
     output = ""
     data_section = ""
 
@@ -220,7 +220,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
 
     block_type_stack: list[list[PillowType]] = []
 
-    code_iter = iter(enumerate(code))
+    code_iter = iter(code)
 
     for i, tok in code_iter:
 
@@ -380,7 +380,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
             case TokenType.END:
-                opening_token = code[tok.value]
+                _, opening_token = code[tok.value]
                 old_block_type_stack = block_type_stack.pop()
                 match opening_token.token_type:
                     case TokenType.IF:
@@ -502,7 +502,7 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        assembly, _ = emit(lex(f.read()), target)
+        assembly, _ = emit(list(enumerate(lex(f.read()))), target)
         compile(assembly, target, output_file)
 
 
