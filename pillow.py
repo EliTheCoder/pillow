@@ -140,14 +140,20 @@ class Procedure():
         def e(x: str) -> None:
             nonlocal output
             output += x + "\n"
+
+        def push(x: str) -> None:
+            e("sub r12, 8")
+            e("mov qword [r12], " + x)
+
+        def pop(x: str) -> None:
+            e("mov " + x + ", [r12]")
+            e("add r12, 8")
         
         assembly, exit_stack = emit(self.code, None, self.takes.copy())
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
         e(self.proc_name() + ":")
-        e("pop r12")
         e(assembly)
-        e("push r12")
         e("ret")
 
         return output
@@ -171,6 +177,14 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
         nonlocal output
         output += x + "\n"
 
+    def push(x: str) -> None:
+        e("sub r12, 8")
+        e("mov qword [r12], " + x)
+
+    def pop(x: str) -> None:
+        e("mov " + x + ", qword [r12]")
+        e("add r12, 8")
+
     def d(x: str) -> None:
         nonlocal data_section
         data_section += x + "\n"
@@ -192,6 +206,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             e("section '.text' executable")
 
             e("main:")
+            e("lea r12, [pillow_stack + 4096]")
 
         case Target.WINDOWS:
             e("format PE64")
@@ -201,6 +216,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             e("section '.text' code executable")
 
             e("main:")
+            e("lea r12, [pillow_stack + 4096]")
 
 
     block_type_stack: list[list[PillowType]] = []
@@ -215,86 +231,86 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
         match tok.token_type:
             case TokenType.INTEGER:
                 t([], [PillowType.INT])
-                e("push " + str(tok.value))
+                push(str(tok.value))
             case TokenType.STRING:
                 t([], [PillowType.STR])
                 d("string_" + str(i) + " db \"" + tok.value + "\", 0")
-                e("push string_" + str(i))
+                push("string_" + str(i))
             case TokenType.ADD:
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("pop rbx")
-                e("pop rax")
+                pop("rbx")
+                pop("rax")
                 e("add rax, rbx")
-                e("push rax")
+                push("rax")
             case TokenType.SUB:
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("pop rbx")
-                e("pop rax")
+                pop("rbx")
+                pop("rax")
                 e("sub rax, rbx")
-                e("push rax")
+                push("rax")
             case TokenType.MUL:
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("pop rbx")
-                e("pop rax")
+                pop("rbx")
+                pop("rax")
                 e("imul rbx")
-                e("push rax")
+                push("rax")
             case TokenType.DIV:
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("pop rbx")
-                e("pop rax")
+                pop("rbx")
+                pop("rax")
                 e("cqo")
                 e("idiv rbx")
-                e("push rax")
+                push("rax")
             case TokenType.MOD:
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("pop rbx")
-                e("pop rax")
+                pop("rbx")
+                pop("rax")
                 e("cqo")
                 e("idiv rbx")
-                e("push rdx")
+                push("rdx")
             case TokenType.INC:
                 t([PillowType.INT], [PillowType.INT])
-                e("pop rax")
+                pop("rax")
                 e("inc rax")
-                e("push rax")
+                push("rax")
             case TokenType.DEC:
                 t([PillowType.INT], [PillowType.INT])
-                e("pop rax")
+                pop("rax")
                 e("dec rax")
-                e("push rax")
+                push("rax")
             case TokenType.DUP:
                 type_stack.append(type_stack[-1])
-                e("mov rax, [rsp]")
-                e("push rax")
+                e("mov rax, [r12]")
+                push("rax")
             case TokenType.SWP:
                 assert len(type_stack) >= 2, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
                 takes = type_stack[-2:]
                 gives = [takes[1], takes[0]]
                 t(takes, gives)
-                e("pop rax")
-                e("pop rbx")
-                e("push rax")
-                e("push rbx")
+                pop("rax")
+                pop("rbx")
+                push("rax")
+                push("rbx")
             case TokenType.POP:
                 t([PillowType.INT], [])
-                e("add rsp, 8")
+                e("add r12, 8")
             case TokenType.NOT:
                 t([PillowType.INT], [PillowType.INT])
-                e("pop rax")
+                pop("rax")
                 e("test rax, rax")
                 e("sete al")
                 e("movzx rax, al")
-                e("push rax")
+                push("rax")
             case TokenType.PRINT:
                 assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
                 match type_stack[-1]:
                     case PillowType.INT:
                         t([PillowType.INT], [])
-                        e("pop rax")
+                        pop("rax")
                         e("call print_int")
                     case PillowType.STR:
                         t([PillowType.STR], [])
-                        e("pop rax")
+                        pop("rax")
                         e("call print_str")
                     case _:
                         assert False, f"Print expected int or str, found {type_stack[-1]}"
@@ -303,17 +319,16 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
                 match type_stack[-1]:
                     case PillowType.INT:
                         t([PillowType.INT], [])
-                        e("pop rax")
+                        pop("rax")
                         e("call print_int")
                     case PillowType.STR:
                         t([PillowType.STR], [])
-                        e("pop rax")
+                        pop("rax")
                         e("call print_str")
                     case _:
                         assert False, f"Println expected int or str, found {type_stack[-1]}"
                 e("call print_ln")
             case TokenType.NAME:
-                assert target is not None, "Cannot call prodedure from a procedure"
                 assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
                 procedure = next((x for x in procedures if x.name == tok.value and type_stack[-len(x.takes):] == x.takes), None)
                 assert procedure is not None, f"No overload for {tok.value} matches {type_stack}"
@@ -350,7 +365,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             case TokenType.IF:
                 t([PillowType.INT], [])
                 block_type_stack.append(type_stack.copy())
-                e("pop rax")
+                pop("rax")
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
             case TokenType.ELSE:
@@ -362,7 +377,7 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             case TokenType.WHILE:
                 block_type_stack.append(type_stack.copy())
                 e("label_" + str(i) + ":")
-                e("mov rax, [rsp]")
+                e("mov rax, [r12]")
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
             case TokenType.END:
@@ -413,6 +428,9 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
 
             e("".join(procedure.emit() for procedure in procedures))
 
+            e("section '.bss' writeable")
+            e("pillow_stack rb 4096")
+
             e("section '.data' writeable")
             e(data_section)
             e("fmt db \"%d\", 0")
@@ -447,6 +465,9 @@ def emit(code: list[Token], target: Target | None, type_stack: list[PillowType] 
             e("ret")
 
             e("".join(procedure.emit() for procedure in procedures))
+
+            e("section '.bss' readable writeable")
+            e("pillow_stack rb 4096")
 
             e("section '.data' data readable writeable")
             e(data_section)
