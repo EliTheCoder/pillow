@@ -1,0 +1,15 @@
+proc fibonacci
+    int -> int
+do
+    dup dup -- && ! if else
+        dup 1 - fibonacci
+        swp 2 - fibonacci
+        +
+    end
+end
+
+20 while
+    dup 21 swp -
+    fibonacci println
+    --
+end
