@@ -22,6 +22,8 @@ class TokenType(Enum):
     SWP = auto()
     OVR = auto()
     NOT = auto()
+    OR = auto()
+    AND = auto()
     POP = auto()
     PROC = auto()
     INT_TYPE = auto()
@@ -71,6 +73,8 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "ovr": return Token(TokenType.OVR)
     if tok == "pop": return Token(TokenType.POP)
     if tok == "!": return Token(TokenType.NOT)
+    if tok == "||": return Token(TokenType.OR)
+    if tok == "&&": return Token(TokenType.AND)
     if tok == "print": return Token(TokenType.PRINT)
     if tok == "println": return Token(TokenType.PRINTLN)
     if tok == "int": return Token(TokenType.INT_TYPE)
@@ -312,6 +316,18 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("test rax, rax")
                 e("sete al")
                 e("movzx rax, al")
+                push("rax")
+            case TokenType.OR:
+                t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                pop("rax")
+                pop("rbx")
+                e("or rax, rbx")
+                push("rax")
+            case TokenType.AND:
+                t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                pop("rax")
+                pop("rbx")
+                e("and rax, rbx")
                 push("rax")
             case TokenType.PRINT:
                 assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
