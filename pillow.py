@@ -194,6 +194,16 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("extrn printf")
             e("section '.text' executable")
 
+            e("macro spush value")
+            e("    sub r12, 8")
+            e("    mov qword [r12], value")
+            e("end macro")
+
+            e("macro spop value")
+            e("    mov value, qword [r12]")
+            e("    add r12, 8")
+            e("end macro")
+
             e("main:")
             e("lea r12, [pillow_stack + 4096]")
 
