@@ -11,6 +11,18 @@ do
     double swp
 end
 
+asm not_equals # literally just subtraction
+    int int -> int
+do
+    "spop rax"
+    "spop rbx"
+    "sub rbx, rax"
+    "spush rbx"
+end
+
+104 100 not_equals println
+200 200 not_equals println
+
 50 40 doubledouble print " " print println
 
 123 print

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
 from enum import Enum, auto
-from typing import Any
+from typing import Any, Union
 from subprocess import run, DEVNULL
 from sys import argv
 from pathlib import Path
@@ -26,6 +27,7 @@ class TokenType(Enum):
     AND = auto()
     POP = auto()
     PROC = auto()
+    ASM = auto()
     INT_TYPE = auto()
     STR_TYPE = auto()
     ARROW = auto()
@@ -85,6 +87,10 @@ def lex_token(tok: str, i: int) -> Token:
         token = Token(TokenType.PROC)
         block_stack.append((i, token))
         return token
+    if tok == "asm":
+        token = Token(TokenType.ASM)
+        block_stack.append((i, token))
+        return token
     if tok == "if":
         token = Token(TokenType.IF)
         block_stack.append((i, token))
@@ -141,7 +147,7 @@ class Procedure():
         self.gives = gives
         self.code = code
     
-    def emit(self, procedures) -> tuple[str, str]:
+    def emit(self, procedures: list[Union[Procedure, AsmProcedure]]) -> tuple[str, str]:
         output = ""
         def e(x: str) -> None:
             nonlocal output
@@ -162,11 +168,26 @@ class Procedure():
     def __repr__(self) -> str:
         return f"{self.name} {self.takes} -> {self.gives}"
 
+class AsmProcedure():
+    def __init__(self, name: str, takes: list[PillowType], gives: list[PillowType], code: list[tuple[int, Token]]):
+        self.name = name
+        self.takes = takes
+        self.gives = gives
+        self.code = code
+    
+    def emit(self) -> str:
+        assert all(tok.token_type == TokenType.STRING for _, tok in self.code), "Assembly procedures must have only strings in them"
+
+        return "\n".join([tok.value for _, tok in self.code])
+    
+    def __repr__(self) -> str:
+        return f"{self.name} {self.takes} -> {self.gives}"
+
 class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Procedure] = []) -> tuple[str, list[PillowType], str]:
+def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Union[Procedure, AsmProcedure]] = []) -> tuple[str, list[PillowType], str]:
     output = ""
     data_section = ""
 
@@ -366,8 +387,11 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 procedure = next((x for x in procedures if x.name == tok.value and type_stack[-len(x.takes):] == x.takes), None)
                 assert procedure is not None, f"No overload for {tok.value} matches {type_stack}"
                 t(procedure.takes, procedure.gives)
-                e("call " + procedure.proc_name())
-            case TokenType.PROC:
+                if isinstance(procedure, Procedure):
+                    e("call " + procedure.proc_name())
+                else:
+                    e(procedure.emit())
+            case TokenType.PROC | TokenType.ASM:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
                 takes_type = None
@@ -393,7 +417,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 if already_defined_proc is not None: assert False, f"Procedure {already_defined_proc} is already defined"
                 overload_different_takes = next((procedure for procedure in procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
                 if overload_different_takes is not None: assert False, f"Procedure {overload_different_takes} takes a different number of items"
-                procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                if tok.token_type == TokenType.PROC:
+                    procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                else:
+                    procedures.append(AsmProcedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
                 while do_i < tok.value: do_i, _ = next(code_iter)
             case TokenType.IF:
                 t([PillowType.INT], [])
@@ -460,9 +487,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("ret")
 
             for procedure in procedures:
-                proc_code, proc_data = procedure.emit(procedures)
-                e(proc_code)
-                d(proc_data)
+                if isinstance(procedure, Procedure):
+                    proc_code, proc_data = procedure.emit(procedures)
+                    e(proc_code)
+                    d(proc_data)
 
             e("section '.bss' writeable")
             e("pillow_stack rb 4096")
@@ -501,9 +529,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("ret")
 
             for procedure in procedures:
-                proc_code, proc_data = procedure.emit(procedures)
-                e(proc_code)
-                d(proc_data)
+                if isinstance(procedure, Procedure):
+                    proc_code, proc_data = procedure.emit(procedures)
+                    e(proc_code)
+                    d(proc_data)
 
             e("section '.bss' readable writeable")
             e("pillow_stack rb 4096")
