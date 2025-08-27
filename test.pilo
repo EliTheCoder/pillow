@@ -34,6 +34,7 @@ end
 2 3 + println
 
 12 10 - println
+12.0 10.0 - println
 
 11 3 * println
 
