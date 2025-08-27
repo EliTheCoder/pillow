@@ -232,8 +232,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 
             e("macro spush value")
             e("    sub r12, 8")
-            e("    mov rax, value")
-            e("    mov qword [r12], rax")
+            e("    mov r8, value")
+            e("    mov qword [r12], r8")
             e("end macro")
 
             e("macro spop value")
