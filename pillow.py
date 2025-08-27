@@ -6,10 +6,12 @@ from typing import Any, Union
 from subprocess import run, DEVNULL
 from sys import argv
 from pathlib import Path
+from struct import pack, unpack
 import os
 
 class TokenType(Enum):
     INTEGER = auto()
+    FLOAT = auto()
     STRING = auto()
     NAME = auto()
     ADD = auto()
@@ -29,6 +31,7 @@ class TokenType(Enum):
     PROC = auto()
     ASM = auto()
     INT_TYPE = auto()
+    FLO_TYPE = auto()
     STR_TYPE = auto()
     ARROW = auto()
     DO = auto()
@@ -50,6 +53,7 @@ class Token():
         
 class PillowType(Enum):
     INT = auto()
+    FLO = auto()
     STR = auto()
     
     def __repr__(self) -> str:
@@ -60,7 +64,14 @@ class PillowType(Enum):
 
 block_stack: list[tuple[int, Token]] = []
 def lex_token(tok: str, i: int) -> Token:
-    if tok.isnumeric(): return Token(TokenType.INTEGER, int(tok))
+    try:
+        return Token(TokenType.INTEGER, int(tok))
+    except ValueError:
+        pass
+    try:
+        return Token(TokenType.FLOAT, float(tok))
+    except ValueError:
+        pass
     if tok.startswith("\"") and tok.endswith("\""): return Token(TokenType.STRING, tok[1:-1])
     tok = tok.lower()
     if tok == "+": return Token(TokenType.ADD)
@@ -80,6 +91,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "print": return Token(TokenType.PRINT)
     if tok == "println": return Token(TokenType.PRINTLN)
     if tok == "int": return Token(TokenType.INT_TYPE)
+    if tok == "flo": return Token(TokenType.FLO_TYPE)
     if tok == "str": return Token(TokenType.STR_TYPE)
     if tok == "->": return Token(TokenType.ARROW)
     if tok == "do": return Token(TokenType.DO)
@@ -157,7 +169,10 @@ class Procedure():
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
         e(self.proc_name() + ":")
+        e("push rbp")
+        e("mov rbp, rsp")
         e(assembly)
+        e("leave")
         e("ret")
 
         return output, data_section
@@ -217,11 +232,22 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 
             e("macro spush value")
             e("    sub r12, 8")
-            e("    mov qword [r12], value")
+            e("    mov rax, value")
+            e("    mov qword [r12], rax")
             e("end macro")
 
             e("macro spop value")
             e("    mov value, qword [r12]")
+            e("    add r12, 8")
+            e("end macro")
+
+            e("macro spushsd xmmreg")
+            e("    sub r12, 8")
+            e("    movq [r12], xmmreg")
+            e("end macro")
+
+            e("macro spopsd xmmreg")
+            e("    movq xmmreg, [r12]")
             e("    add r12, 8")
             e("end macro")
 
@@ -237,11 +263,22 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 
             e("macro spush value")
             e("    sub r12, 8")
-            e("    mov qword [r12], value")
+            e("    mov rax, value")
+            e("    mov qword [r12], rax")
             e("end macro")
 
             e("macro spop value")
             e("    mov value, qword [r12]")
+            e("    add r12, 8")
+            e("end macro")
+
+            e("macro spushsd xmmreg")
+            e("    sub r12, 8")
+            e("    movq [r12], xmmreg")
+            e("end macro")
+
+            e("macro spopsd xmmreg")
+            e("    movq xmmreg, [r12]")
             e("    add r12, 8")
             e("end macro")
 
@@ -257,11 +294,16 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 
         def t(takes: list[PillowType], gives: list[PillowType]) -> None:
             type_stack_op(tok, takes, gives)
+
         
         match tok.token_type:
             case TokenType.INTEGER:
                 t([], [PillowType.INT])
                 e("spush " + str(tok.value))
+            case TokenType.FLOAT:
+                t([], [PillowType.FLO])
+                bits, = unpack("<Q", pack("<d", tok.value))
+                e("spush " + hex(bits))
             case TokenType.STRING:
                 t([], [PillowType.STR])
                 d("string_" + str(i) + " db \"" + tok.value + "\", 0")
@@ -273,17 +315,31 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("add rax, rbx")
                 e("spush rax")
             case TokenType.SUB:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rbx")
-                e("spop rax")
-                e("sub rax, rbx")
-                e("spush rax")
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("sub rax, rbx")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
+                    e("spopsd xmm1")
+                    e("spopsd xmm0")
+                    e("subsd xmm0, xmm1")
+                    e("spushsd xmm1")
             case TokenType.MUL:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rbx")
-                e("spop rax")
-                e("imul rbx")
-                e("spush rax")
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("imul rbx")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
+                    e("spopsd xmm1")
+                    e("spopsd xmm0")
+                    e("mulsd xmm1, xmm0")
+                    e("spushsd xmm1")
             case TokenType.DIV:
                 t([PillowType.INT, PillowType.INT], [PillowType.INT])
                 e("spop rbx")
@@ -362,6 +418,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         t([PillowType.INT], [])
                         e("spop rax")
                         e("call print_int")
+                    case PillowType.FLO:
+                        t([PillowType.FLO], [])
+                        e("spopsd xmm0")
+                        e("call print_flo")
                     case PillowType.STR:
                         t([PillowType.STR], [])
                         e("spop rax")
@@ -375,6 +435,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         t([PillowType.INT], [])
                         e("spop rax")
                         e("call print_int")
+                    case PillowType.FLO:
+                        t([PillowType.FLO], [])
+                        e("spopsd xmm0")
+                        e("call print_flo")
                     case PillowType.STR:
                         t([PillowType.STR], [])
                         e("spop rax")
@@ -400,6 +464,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     _, takes_type = next(code_iter)
                     match takes_type.token_type:
                         case TokenType.INT_TYPE: takes_types.append(PillowType.INT)
+                        case TokenType.FLO_TYPE: takes_types.append(PillowType.FLO)
                         case TokenType.STR_TYPE: takes_types.append(PillowType.STR)
                         case TokenType.ARROW: break
                         case _: assert False, f"Expected type or arrow but found {takes_type}"
@@ -410,6 +475,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     do_i, gives_type = next(code_iter)
                     match gives_type.token_type:
                         case TokenType.INT_TYPE: gives_types.append(PillowType.INT)
+                        case TokenType.FLO_TYPE: gives_types.append(PillowType.FLO)
                         case TokenType.STR_TYPE: gives_types.append(PillowType.STR)
                         case TokenType.DO: break
                         case _: assert False, f"Expected type or do but found {gives_type}"
@@ -462,28 +528,43 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("call exit")
 
             e("print_int:")
-            e("sub rsp, 32")
-            e("mov rdi, fmt")
+            e("push rbp")
+            e("mov rbp, rsp")
+            e("mov rdi, int_fmt")
             e("mov rsi, rax")
             e("xor rax, rax")
             e("call printf")
-            e("add rsp, 32")
+            e("leave")
+            e("ret")
+
+            e("print_flo:")
+            e("push rbp")
+            e("mov rbp, rsp")
+            e("sub rsp, 8")
+            e("lea rdi, [flo_fmt]")
+            e("mov eax, 1")
+            e("call printf")
+            e("leave")
             e("ret")
 
             e("print_str:")
-            e("sub rsp, 32")
+            e("push rbp")
+            e("mov rbp, rsp")
             e("mov rdi, rax")
             e("xor rax, rax")
             e("call printf")
-            e("add rsp, 32")
+            e("leave")
             e("ret")
 
             e("print_ln:")
+            e("push rbp")
+            e("mov rbp, rsp")
             e("sub rsp, 32")
             e("mov rdi, newline")
             e("xor rax, rax")
             e("call printf")
             e("add rsp, 32")
+            e("leave")
             e("ret")
 
             for procedure in procedures:
@@ -497,7 +578,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 
             e("section '.data' writeable")
             e(data_section)
-            e("fmt db \"%d\", 0")
+            e("int_fmt db \"%d\", 0")
+            e("flo_fmt db \"%f\", 0")
             e("newline db 10, 0")
 
             e("section '.note.GNU-stack'")
@@ -552,7 +634,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 def compile(assembly: str, target: Target, output_path: Path) -> None:
     with open(output_path.with_suffix(".s"), "w") as f:
         f.write(assembly)
-    fasm_result = run(["C:\\Program Files\\fasm2\\fasm2.cmd", output_path.with_suffix(".s")], stdout = DEVNULL)
+    fasm_result = run(["./fasm2/fasm2.exe" if target == Target.WINDOWS else "./fasm2/fasm2", output_path.with_suffix(".s")], stdout = DEVNULL)
     assert fasm_result.returncode == 0, "Failed to assemble"
     if target == Target.LINUX:
         run(["clang", "-no-pie", output_path.with_suffix(".o"), "-o", output_path.with_suffix("")])

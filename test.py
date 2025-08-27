@@ -9,6 +9,7 @@ result_b = subprocess.run(["test.exe" if os.name == "nt" else "./test"], capture
 
 expected_output = """4
 0
+20.000000
 80 100
 123456
 5

@@ -23,6 +23,8 @@ end
 104 100 not_equals println
 200 200 not_equals println
 
+10.0 2.0 * println
+
 50 40 doubledouble print " " print println
 
 123 print
