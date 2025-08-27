@@ -39,6 +39,9 @@ expected_output = """4
 62
 65
 strimg cheese
+2
+4
+3
 """
 
 if result_b.stdout != expected_output:

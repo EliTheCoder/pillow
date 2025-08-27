@@ -23,7 +23,7 @@ class TokenType(Enum):
     DEC = auto()
     DUP = auto()
     SWP = auto()
-    OVR = auto()
+    ROT = auto()
     NOT = auto()
     OR = auto()
     AND = auto()
@@ -83,7 +83,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "--": return Token(TokenType.DEC)
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
-    if tok == "ovr": return Token(TokenType.OVR)
+    if tok == "rot": return Token(TokenType.ROT)
     if tok == "pop": return Token(TokenType.POP)
     if tok == "!": return Token(TokenType.NOT)
     if tok == "||": return Token(TokenType.OR)
@@ -377,7 +377,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("spop rbx")
                 e("spush rax")
                 e("spush rbx")
-            case TokenType.OVR:
+            case TokenType.ROT:
                 assert len(type_stack) >= 3, f"Instruction {tok} takes 3 items but found {len(type_stack)}"
                 takes = type_stack[-3:]
                 gives = [takes[1], takes[2], takes[0]]

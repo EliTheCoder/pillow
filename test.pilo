@@ -88,3 +88,5 @@ end
 # 5 println
 
 "strimg cheese" println
+
+2 3 4 rot println println println
