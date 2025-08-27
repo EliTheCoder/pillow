@@ -323,9 +323,9 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("spush rax")
                 elif type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
+                    e("spopsd xmm2")
                     e("spopsd xmm1")
-                    e("spopsd xmm0")
-                    e("subsd xmm0, xmm1")
+                    e("subsd xmm1, xmm2")
                     e("spushsd xmm1")
             case TokenType.MUL:
                 if type_stack[-1] == PillowType.INT:
