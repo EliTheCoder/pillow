@@ -309,11 +309,18 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 d("string_" + str(i) + " db \"" + tok.value + "\", 0")
                 e("spush string_" + str(i))
             case TokenType.ADD:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rbx")
-                e("spop rax")
-                e("add rax, rbx")
-                e("spush rax")
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("add rax, rbx")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
+                    e("spopsd xmm2")
+                    e("spopsd xmm1")
+                    e("addsd xmm1, xmm2")
+                    e("spushsd xmm1")
             case TokenType.SUB:
                 if type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
