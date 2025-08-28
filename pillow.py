@@ -586,7 +586,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("section '.data' writeable")
             e(data_section)
             e("int_fmt db \"%d\", 0")
-            e("flo_fmt db \"%f\", 0")
+            e("flo_fmt db \"%g\", 0")
             e("newline db 10, 0")
 
             e("section '.note.GNU-stack'")
