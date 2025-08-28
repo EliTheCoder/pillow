@@ -641,7 +641,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
 def compile(assembly: str, target: Target, output_path: Path) -> None:
     with open(output_path.with_suffix(".s"), "w") as f:
         f.write(assembly)
-    fasm_result = run(["./fasm2/fasm2.exe" if target == Target.WINDOWS else "./fasm2/fasm2", output_path.with_suffix(".s")], stdout = DEVNULL)
+    fasm_result = run([".\\fasm2\\fasm2.cmd" if target == Target.WINDOWS else "./fasm2/fasm2", output_path.with_suffix(".s")], stdout = DEVNULL)
     assert fasm_result.returncode == 0, "Failed to assemble"
     if target == Target.LINUX:
         run(["clang", "-no-pie", output_path.with_suffix(".o"), "-o", output_path.with_suffix("")])
