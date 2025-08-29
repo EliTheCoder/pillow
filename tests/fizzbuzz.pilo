@@ -1,6 +1,3 @@
-# vim: ft=julia
-
-
 30 while --
     dup 30 swp -
     dup 15 % ! if 
