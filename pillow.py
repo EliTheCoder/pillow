@@ -455,7 +455,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("call print_ln")
             case TokenType.NAME:
                 assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
-                procedure = next((x for x in procedures if x.name == tok.value and type_stack[-len(x.takes):] == x.takes), None)
+                procedure = next((x for x in procedures if x.name == tok.value and (type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
                 assert procedure is not None, f"No overload for {tok.value} matches {type_stack}"
                 t(procedure.takes, procedure.gives)
                 if isinstance(procedure, Procedure):
