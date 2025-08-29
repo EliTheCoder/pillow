@@ -1,3 +1,9 @@
+proc space
+    ->
+do
+    " " print
+end
+
 proc double
     int -> int
 do
@@ -91,3 +97,5 @@ end
 "strimg cheese" println
 
 2 3 4 rot println println println
+
+1 2 3 4 5 roll4 roll3 print space print space print space print space println

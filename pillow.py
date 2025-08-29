@@ -24,6 +24,7 @@ class TokenType(Enum):
     DUP = auto()
     SWP = auto()
     ROT = auto()
+    ROLL = auto()
     NOT = auto()
     OR = auto()
     AND = auto()
@@ -84,6 +85,8 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
     if tok == "rot": return Token(TokenType.ROT)
+    if tok == "roll3": return Token(TokenType.ROLL, 3)
+    if tok == "roll4": return Token(TokenType.ROLL, 4)
     if tok == "pop": return Token(TokenType.POP)
     if tok == "!": return Token(TokenType.NOT)
     if tok == "||": return Token(TokenType.OR)
@@ -395,6 +398,20 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("spush rbx")
                 e("spush rax")
                 e("spush rdi")
+            case TokenType.ROLL:
+                roll_size = tok.value + 1
+                assert len(type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(type_stack)}"
+                takes = type_stack[-roll_size:]
+                gives = [*takes[1:], takes[0]]
+                t(takes, gives)
+                for i in range(roll_size-1):
+                    e("spop rax")
+                    e("push rax")
+                e("spop rbx")
+                for i in range(roll_size-1):
+                    e("pop rax")
+                    e("spush rax")
+                e("spush rbx")
             case TokenType.POP:
                 t([PillowType.INT], [])
                 e("add r12, 8")
