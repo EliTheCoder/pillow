@@ -45,6 +45,10 @@ strimg cheese
 3
 3 1 5 4 2
 7 10 9 8 7
+1
+0
+1
+0
 """
 
 if result_b.stdout != expected_output:

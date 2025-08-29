@@ -29,6 +29,7 @@ class TokenType(Enum):
     NOT = auto()
     OR = auto()
     AND = auto()
+    GT = auto()
     POP = auto()
     PROC = auto()
     ASM = auto()
@@ -96,6 +97,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "!": return Token(TokenType.NOT)
     if tok == "||": return Token(TokenType.OR)
     if tok == "&&": return Token(TokenType.AND)
+    if tok == ">": return Token(TokenType.GT)
     if tok == "print": return Token(TokenType.PRINT)
     if tok == "println": return Token(TokenType.PRINTLN)
     if tok == "int": return Token(TokenType.INT_TYPE)
@@ -448,6 +450,24 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("test rbx, rbx")
                 e("cmovz rax, rbx")
                 e("spush rax")
+            case TokenType.GT:
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("cmp rax, rbx")
+                    e("setg al")
+                    e("movzx rax, al")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
+                    e("spopsd xmm2")
+                    e("spopsd xmm1")
+                    e("comisd xmm1, xmm2")
+                    e("seta al")
+                    e("movzx rax, al")
+                    e("spush rax")
             case TokenType.PRINT:
                 assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
                 match type_stack[-1]:
