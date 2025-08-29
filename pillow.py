@@ -90,6 +90,8 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "roll3": return Token(TokenType.ROLL, 3)
     if tok == "roll4": return Token(TokenType.ROLL, 4)
     if tok == "roll5": return Token(TokenType.ROLL, 5)
+    if tok == "over": return Token(TokenType.OVER, 1)
+    if tok == "over2": return Token(TokenType.OVER, 2)
     if tok == "over3": return Token(TokenType.OVER, 3)
     if tok == "over4": return Token(TokenType.OVER, 4)
     if tok == "over5": return Token(TokenType.OVER, 5)
