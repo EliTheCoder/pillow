@@ -456,7 +456,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("cmovz rax, rbx")
                 e("spush rax")
             case TokenType.GT:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
                 if type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
