@@ -1,0 +1,70 @@
+proc complex_println # prints a complex number
+    flo flo ->
+do
+    swp print
+    "+" print 
+    print
+    "i" println
+end
+
+proc complex_square # squares a complex number
+    flo flo -> flo flo
+do
+    swp dup dup *
+    rot dup dup *
+    rot swp -
+    rot rot 2.0 * *
+end
+
+proc complex_add # adds two complex numbers
+    flo flo flo flo -> flo flo
+do
+    rot + rot rot + swp
+end
+
+proc complex_magnitude_squared # gives the squared magnitude of a complex number
+    flo flo -> flo
+do
+    dup * swp dup * +
+end
+
+
+proc mandelbrot # tells if a complex number is within the mandelbrot set
+    flo flo -> flo
+do
+    0.0 0.0
+    1000 while
+        rot rot
+        complex_square
+        over4 over4 complex_add
+        over over complex_magnitude_squared
+        4.0 > !
+        roll3 -- *
+    end
+    pop complex_magnitude_squared
+    4.0 > if
+        1.0
+    else
+        0.0
+    end
+    rot rot pop pop
+end
+
+
+
+-1.0 1 while pop
+    
+    -2.0 1 while pop
+
+        over over swp
+        mandelbrot 0.5 >
+        if " " print
+        else "█" print
+        end
+        
+        0.005 +
+    dup 1.0 > ! end pop pop
+
+    "" println
+    0.01 +
+dup 1.0 > ! end
