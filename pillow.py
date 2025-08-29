@@ -566,7 +566,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
             case TokenType.END:
-                _, opening_token = code[tok.value]
+                _, opening_token = next(x for x in code if x[0] == tok.value)
                 old_block_type_stack = block_type_stack.pop()
                 match opening_token.token_type:
                     case TokenType.IF:
