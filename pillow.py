@@ -524,6 +524,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                             e("mov rax, [r12+" + str(offset) + "]")
                             e("call print_str")
                     e("call print_spc")
+                e("call print_ln")
             case TokenType.NAME:
                 assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
                 procedure = next((x for x in procedures if x.name == tok.value and (type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
