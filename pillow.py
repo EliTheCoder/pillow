@@ -415,11 +415,11 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 takes = type_stack[-roll_size:]
                 gives = [*takes[1:], takes[0]]
                 t(takes, gives)
-                for i in range(roll_size-1):
+                for _ in range(roll_size-1):
                     e("spop rax")
                     e("push rax")
                 e("spop rbx")
-                for i in range(roll_size-1):
+                for _ in range(roll_size-1):
                     e("pop rax")
                     e("spush rax")
                 e("spush rbx")
@@ -432,7 +432,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("mov rax, [r12+" + str(8*(over_size-1)) + "]")
                 e("spush rax")
             case TokenType.POP:
-                t([PillowType.INT], [])
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
+                t([type_stack[-1]], [])
                 e("add r12, 8")
             case TokenType.NOT:
                 t([PillowType.INT], [PillowType.INT])
@@ -505,7 +506,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         e("spop rax")
                         e("call print_str")
                     case _:
-                        assert False, f"Println expected int or str, found {type_stack[-1]}"
+                        assert False, f"Println expected int, flo, or str, found {type_stack[-1]}"
                 e("call print_ln")
             case TokenType.DUMP:
                 stack_size = len(type_stack)
