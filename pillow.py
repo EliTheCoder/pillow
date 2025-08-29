@@ -40,6 +40,7 @@ class TokenType(Enum):
     DO = auto()
     PRINT = auto()
     PRINTLN = auto()
+    DUMP = auto()
     IF = auto()
     ELSE = auto()
     WHILE = auto()
@@ -102,6 +103,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == ">": return Token(TokenType.GT)
     if tok == "print": return Token(TokenType.PRINT)
     if tok == "println": return Token(TokenType.PRINTLN)
+    if tok == "dump": return Token(TokenType.DUMP)
     if tok == "int": return Token(TokenType.INT_TYPE)
     if tok == "flo": return Token(TokenType.FLO_TYPE)
     if tok == "str": return Token(TokenType.STR_TYPE)
@@ -505,6 +507,22 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     case _:
                         assert False, f"Println expected int or str, found {type_stack[-1]}"
                 e("call print_ln")
+            case TokenType.DUMP:
+                stack_size = len(type_stack)
+                for ind in range(stack_size):
+                    offset = (stack_size - 1 - ind) * 8
+                    item_type = type_stack[ind]
+                    match item_type:
+                        case PillowType.INT:
+                            e("mov rax, [r12+" + str(offset) + "]")
+                            e("call print_int")
+                        case PillowType.FLO:
+                            e("movq xmm0, [r12+" + str(offset) + "]")
+                            e("call print_flo")
+                        case PillowType.STR:
+                            e("mov rax, [r12+" + str(offset) + "]")
+                            e("call print_str")
+                    e("call print_spc")
             case TokenType.NAME:
                 assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
                 procedure = next((x for x in procedures if x.name == tok.value and (type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
@@ -609,9 +627,21 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("print_str:")
             e("push rbp")
             e("mov rbp, rsp")
-            e("mov rdi, rax")
+            e("mov rdi, str_fmt")
+            e("mov rsi, rax")
             e("xor rax, rax")
             e("call printf")
+            e("leave")
+            e("ret")
+
+            e("print_spc:")
+            e("push rbp")
+            e("mov rbp, rsp")
+            e("sub rsp, 32")
+            e("mov rdi, space")
+            e("xor rax, rax")
+            e("call printf")
+            e("add rsp, 32")
             e("leave")
             e("ret")
 
@@ -639,6 +669,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e(data_section)
             e("int_fmt db \"%d\", 0")
             e("flo_fmt db \"%g\", 0")
+            e("str_fmt db \"%s\", 0")
+            e("space db 32, 0")
             e("newline db 10, 0")
 
             e("section '.note.GNU-stack'")

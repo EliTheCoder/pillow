@@ -49,7 +49,7 @@ strimg cheese
 0
 1
 0
-"""
+4 5 6 7.2 beans -4.9 -6 """
 
 if result_b.stdout != expected_output:
     print(f"Expected this output of length {len(expected_output)}:")
