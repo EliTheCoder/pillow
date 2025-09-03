@@ -2,7 +2,8 @@ proc complex_println # prints a complex number
     flo flo ->
 do
     swp print
-    "+" print 
+    dup 0.0 >=
+    if "+" print end
     print
     "i" println
 end
@@ -33,13 +34,13 @@ proc mandelbrot # tells if a complex number is within the mandelbrot set
     flo flo -> flo
 do
     0.0 0.0
-    1000 while
+    0 while dup 1000 < then
         rot rot
         complex_square
         over4 over4 complex_add
         over over complex_magnitude_squared
-        4.0 > !
-        roll3 -- *
+        4.0 >
+        roll3 ++ swp if pop 1000 end
     end
     pop complex_magnitude_squared
     4.0 > if
@@ -52,10 +53,9 @@ end
 
 
 
--1.0 1 while pop
+-1.0 while dup 1.0 < then
     
-    -2.0 1 while pop
-
+    -2.0 while dup 1.0 < then
         over over swp
         mandelbrot 0.5 >
         if " " print
@@ -63,8 +63,9 @@ end
         end
         
         0.005 +
-    dup 1.0 > ! end pop pop
+    end pop
 
     "" println
+
     0.01 +
-dup 1.0 > ! end
+end

@@ -30,6 +30,9 @@ class TokenType(Enum):
     OR = auto()
     AND = auto()
     GT = auto()
+    GTE = auto()
+    LT = auto()
+    LTE = auto()
     POP = auto()
     PROC = auto()
     ASM = auto()
@@ -44,6 +47,7 @@ class TokenType(Enum):
     IF = auto()
     ELSE = auto()
     WHILE = auto()
+    THEN = auto()
     END = auto()
 
 
@@ -101,6 +105,9 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "||": return Token(TokenType.OR)
     if tok == "&&": return Token(TokenType.AND)
     if tok == ">": return Token(TokenType.GT)
+    if tok == ">=": return Token(TokenType.GTE)
+    if tok == "<": return Token(TokenType.LT)
+    if tok == "<=": return Token(TokenType.LTE)
     if tok == "print": return Token(TokenType.PRINT)
     if tok == "println": return Token(TokenType.PRINTLN)
     if tok == "dump": return Token(TokenType.DUMP)
@@ -133,9 +140,18 @@ def lex_token(tok: str, i: int) -> Token:
         token = Token(TokenType.WHILE)
         block_stack.append((i, token))
         return token
+    if tok == "then":
+        assert len(block_stack) > 0, "Then is missing corresponding while"
+        opening_i, opening_tok = block_stack.pop()
+        assert opening_tok.token_type == TokenType.WHILE, "Then is missing corresponding while"
+        token = Token(TokenType.THEN, opening_i)
+        block_stack.append((i, token))
+        return token
     if tok == "end":
         assert len(block_stack) > 0, "Mismatched end"
         opening_i, opening_tok = block_stack.pop()
+        assert opening_tok.token_type != TokenType.WHILE, "While is missing corresponding then"
+        if opening_tok.token_type == TokenType.THEN: opening_i = opening_tok.value
         opening_tok.value = i
         return Token(TokenType.END, opening_i)
     return Token(TokenType.NAME, tok)
@@ -473,6 +489,60 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("seta al")
                     e("movzx rax, al")
                     e("spush rax")
+            case TokenType.GTE:
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("cmp rax, rbx")
+                    e("setge al")
+                    e("movzx rax, al")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
+                    e("spopsd xmm2")
+                    e("spopsd xmm1")
+                    e("comisd xmm1, xmm2")
+                    e("setae al")
+                    e("movzx rax, al")
+                    e("spush rax")
+            case TokenType.LT:
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("cmp rax, rbx")
+                    e("setl al")
+                    e("movzx rax, al")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
+                    e("spopsd xmm2")
+                    e("spopsd xmm1")
+                    e("comisd xmm1, xmm2")
+                    e("setb al")
+                    e("movzx rax, al")
+                    e("spush rax")
+            case TokenType.LTE:
+                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
+                if type_stack[-1] == PillowType.INT:
+                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
+                    e("spop rbx")
+                    e("spop rax")
+                    e("cmp rax, rbx")
+                    e("setle al")
+                    e("movzx rax, al")
+                    e("spush rax")
+                elif type_stack[-1] == PillowType.FLO:
+                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
+                    e("spopsd xmm2")
+                    e("spopsd xmm1")
+                    e("comisd xmm1, xmm2")
+                    e("setbe al")
+                    e("movzx rax, al")
+                    e("spush rax")
             case TokenType.PRINT:
                 assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
                 match type_stack[-1]:
@@ -582,7 +652,12 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             case TokenType.WHILE:
                 block_type_stack.append(type_stack.copy())
                 e("label_" + str(i) + ":")
-                e("mov rax, [r12]")
+            case TokenType.THEN:
+                t([PillowType.INT], [])
+                old_block_type_stack = block_type_stack.pop()
+                block_type_stack.append(type_stack.copy())
+                type_stack = old_block_type_stack
+                e("spop rax")
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
             case TokenType.END:

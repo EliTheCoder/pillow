@@ -8,8 +8,8 @@ do
     end
 end
 
-20 while
-    dup 21 swp -
+1 while dup 20 <= then
+    dup
     fibonacci println
-    --
+    ++
 end

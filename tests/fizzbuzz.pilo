@@ -1,5 +1,6 @@
-30 while --
-    dup 30 swp -
+proc fizzbuzz
+    int -> int
+do
     dup 15 % ! if 
         "FizzBuzz" println
     else dup 3 % ! if
@@ -9,6 +10,11 @@
     else
         dup println
     end end end
-    pop
+end
+
+
+1 while dup 100 <= then
+    fizzbuzz
+    ++
 end
 

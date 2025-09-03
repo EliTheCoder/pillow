@@ -68,7 +68,7 @@ end
 
 6 7 pop println
 
-5 while --
+5 while dup then --
     dup println
 end pop
 
