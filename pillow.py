@@ -34,6 +34,7 @@ class TokenType(Enum):
     LT = auto()
     LTE = auto()
     POP = auto()
+    IMPORT = auto()
     PROC = auto()
     ASM = auto()
     STRUCT = auto()
@@ -119,6 +120,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "str": return Token(TokenType.STR_TYPE)
     if tok == "->": return Token(TokenType.ARROW)
     if tok == "do": return Token(TokenType.DO)
+    if tok == "import": return Token(TokenType.IMPORT, comp_value)
     if tok == "proc":
         token = Token(TokenType.PROC)
         block_stack.append((i, token))
@@ -184,6 +186,10 @@ def lex(code: str) -> list[Token]:
             continue
         start = i
         while i < len(code) and not code[i].isspace():
+            if code[i] == "(":
+                while i < len(code) and code[i] != ")":
+                    i += 1
+                assert code[i] == ")", f"Mismatched parenthesis"
             i += 1
         tokens.append(lex_token(code[start:i], len(tokens)))
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
@@ -705,6 +711,12 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e(procedure.emit())
                 else:
                     e("call " + procedure.proc_name())
+            case TokenType.IMPORT:
+                with open(tok.value, "r") as f:
+                    assert not f.closed, f"Could not import file {tok.value}"
+                    assembly, exit_stack, data_section = emit(list(enumerate(lex(f.read()))), None, type_stack.copy(), procedures, structs)
+                    t([], exit_stack)
+                    e(assembly)
             case TokenType.PROC | TokenType.ASM:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
