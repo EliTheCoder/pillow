@@ -211,12 +211,12 @@ class Procedure():
             nonlocal output
             output += x + "\n"
 
-        proc_emit_info = EmitInfo(info.target, False, self.takes.copy(), info.procedures, info.structs)
+        proc_emit_info = EmitInfo(info.target, False, "", self.takes.copy(), info.procedures, info.structs)
         assembly, data_section = emit(self.code, proc_emit_info)
         exit_stack = proc_emit_info.type_stack
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
-        e(self.proc_name() + ":")
+        e(info.global_prefix + self.proc_name() + ":")
         e("push rbp")
         e("mov rbp, rsp")
         e(assembly)
@@ -352,9 +352,10 @@ class Target(Enum):
     WINDOWS = auto()
 
 class EmitInfo():
-    def __init__(self, target: Target, binary: bool = False, type_stack: list[GlobalType] = [], procedures: list[GlobalProc] = [], structs: list[Struct] = []):
+    def __init__(self, target: Target, binary: bool = False, global_prefix: str = "", type_stack: list[GlobalType] = [], procedures: list[GlobalProc] = [], structs: list[Struct] = []):
         self.target = target
         self.binary = binary
+        self.global_prefix = global_prefix
         self.type_stack = type_stack
         self.procedures = procedures
         self.structs = structs
@@ -464,8 +465,8 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("spush " + hex(bits))
             case TokenType.STRING:
                 t([], [PillowType.STR])
-                d("string_" + str(i) + " db \"" + tok.value + "\", 0")
-                e("spush string_" + str(i))
+                d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
+                e("spush " + info.global_prefix + "string_" + str(i))
             case TokenType.ADD:
                 if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
@@ -724,7 +725,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             case TokenType.IMPORT:
                 with open(tok.value, "r") as f:
                     assert not f.closed, f"Could not import file {tok.value}"
-                    import_emit_info = EmitInfo(info.target, False, [], info.procedures, info.structs)
+                    import_emit_info = EmitInfo(info.target, False, tok.value, [], info.procedures, info.structs)
                     import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
                     t([], import_emit_info.type_stack)
                     e(import_assembly)
