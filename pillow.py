@@ -4,7 +4,7 @@ from __future__ import annotations
 from enum import Enum, auto
 from typing import Any, Union
 from re import fullmatch
-from subprocess import run, DEVNULL
+from subprocess import run
 from sys import argv
 from pathlib import Path
 from struct import pack, unpack
@@ -90,6 +90,7 @@ def lex_token(tok: str, i: int) -> Token:
     m = fullmatch(r"(.*)\((.*)\)", tok)
     if m:
         tok, comp_value = m.groups()
+        comp_value = str(comp_value)
 
     if tok == "+": return Token(TokenType.ADD)
     if tok == "-": return Token(TokenType.SUB)
@@ -101,9 +102,8 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
     if tok == "rot": return Token(TokenType.ROLL, 2)
-    if tok == "roll": return Token(TokenType.ROLL, int(comp_value))
-    if tok == "over" and comp_value is None: return Token(TokenType.OVER, 1)
-    if tok == "over": return Token(TokenType.OVER, int(comp_value))
+    if tok == "roll": return Token(TokenType.ROLL, int(comp_value or 2))
+    if tok == "over": return Token(TokenType.OVER, int(comp_value or 1))
     if tok == "pop": return Token(TokenType.POP)
     if tok == "!": return Token(TokenType.NOT)
     if tok == "||": return Token(TokenType.OR)
@@ -205,13 +205,15 @@ class Procedure():
         self.gives = gives
         self.code = code
     
-    def emit(self, procedures: list[GlobalProc]) -> tuple[str, str]:
+    def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
         def e(x: str) -> None:
             nonlocal output
             output += x + "\n"
 
-        assembly, exit_stack, data_section = emit(self.code, None, self.takes.copy(), procedures)
+        proc_emit_info = EmitInfo(info.target, False, self.takes.copy(), info.procedures, info.structs)
+        assembly, data_section = emit(self.code, proc_emit_info)
+        exit_stack = proc_emit_info.type_stack
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
         e(self.proc_name() + ":")
@@ -251,7 +253,7 @@ class StructProcedure():
         self.takes: list[GlobalType] = list(struct.props.values())
         self.gives: list[GlobalType] = [struct]
     
-    def emit(self, procedures: list[GlobalProc]) -> tuple[str, str]:
+    def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
         def e(x: str) -> None:
             nonlocal output
@@ -285,7 +287,7 @@ class StructPropProcedure():
         self.takes: list[GlobalType] = [struct]
         self.gives: list[GlobalType] = [struct.props[prop]]
     
-    def emit(self, procedures: list[GlobalProc]) -> tuple[str, str]:
+    def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
         def e(x: str) -> None:
             nonlocal output
@@ -349,7 +351,15 @@ class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[GlobalType] = [], procedures: list[GlobalProc] = [], structs: list[Struct] = []) -> tuple[str, list[GlobalType], str]:
+class EmitInfo():
+    def __init__(self, target: Target, binary: bool = False, type_stack: list[GlobalType] = [], procedures: list[GlobalProc] = [], structs: list[Struct] = []):
+        self.target = target
+        self.binary = binary
+        self.type_stack = type_stack
+        self.procedures = procedures
+        self.structs = structs
+
+def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     output = ""
     data_section = ""
 
@@ -362,77 +372,77 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
         data_section += x + "\n"
 
     def type_stack_op(tok: Token, takes: list[GlobalType], gives: list[GlobalType]) -> None:
-        nonlocal type_stack
+        nonlocal info
         if len(takes) > 0:
-            assert type_stack[-len(takes):] == takes, f"Instruction {tok} takes {takes} but found {type_stack[-len(takes):]}"
-            type_stack = type_stack[:-len(takes)]
-        type_stack += gives
+            assert info.type_stack[-len(takes):] == takes, f"Instruction {tok} takes {takes} but found {info.type_stack[-len(takes):]}"
+            info.type_stack = info.type_stack[:-len(takes)]
+        info.type_stack += gives
 
-    match target:
-        case Target.LINUX:
-            e("format ELF64")
+    if info.binary:
+        match info.target:
+            case Target.LINUX:
+                e("format ELF64")
 
-            e("public main")
-            e("extrn exit")
-            e("extrn printf")
-            e("extrn malloc")
-            e("section '.text' executable")
+                e("public main")
+                e("extrn exit")
+                e("extrn printf")
+                e("extrn malloc")
+                e("section '.text' executable")
 
-            e("macro spush value")
-            e("    sub r12, 8")
-            e("    mov r8, value")
-            e("    mov qword [r12], r8")
-            e("end macro")
+                e("macro spush value")
+                e("    sub r12, 8")
+                e("    mov r8, value")
+                e("    mov qword [r12], r8")
+                e("end macro")
 
-            e("macro spop value")
-            e("    mov value, qword [r12]")
-            e("    add r12, 8")
-            e("end macro")
+                e("macro spop value")
+                e("    mov value, qword [r12]")
+                e("    add r12, 8")
+                e("end macro")
 
-            e("macro spushsd xmmreg")
-            e("    sub r12, 8")
-            e("    movq [r12], xmmreg")
-            e("end macro")
+                e("macro spushsd xmmreg")
+                e("    sub r12, 8")
+                e("    movq [r12], xmmreg")
+                e("end macro")
 
-            e("macro spopsd xmmreg")
-            e("    movq xmmreg, [r12]")
-            e("    add r12, 8")
-            e("end macro")
+                e("macro spopsd xmmreg")
+                e("    movq xmmreg, [r12]")
+                e("    add r12, 8")
+                e("end macro")
 
-            e("main:")
-            e("lea r12, [pillow_stack + 4096]")
+                e("main:")
+                e("lea r12, [pillow_stack + 4096]")
 
-        case Target.WINDOWS:
-            e("format PE64")
-            e("entry main")
+            case Target.WINDOWS:
+                e("format PE64")
+                e("entry main")
 
-            e("include 'win64a.inc'")
-            e("section '.text' code executable")
+                e("include 'win64a.inc'")
+                e("section '.text' code executable")
 
-            e("macro spush value")
-            e("    sub r12, 8")
-            e("    mov rax, value")
-            e("    mov qword [r12], rax")
-            e("end macro")
+                e("macro spush value")
+                e("    sub r12, 8")
+                e("    mov rax, value")
+                e("    mov qword [r12], rax")
+                e("end macro")
 
-            e("macro spop value")
-            e("    mov value, qword [r12]")
-            e("    add r12, 8")
-            e("end macro")
+                e("macro spop value")
+                e("    mov value, qword [r12]")
+                e("    add r12, 8")
+                e("end macro")
 
-            e("macro spushsd xmmreg")
-            e("    sub r12, 8")
-            e("    movq [r12], xmmreg")
-            e("end macro")
+                e("macro spushsd xmmreg")
+                e("    sub r12, 8")
+                e("    movq [r12], xmmreg")
+                e("end macro")
 
-            e("macro spopsd xmmreg")
-            e("    movq xmmreg, [r12]")
-            e("    add r12, 8")
-            e("end macro")
+                e("macro spopsd xmmreg")
+                e("    movq xmmreg, [r12]")
+                e("    add r12, 8")
+                e("end macro")
 
-            e("main:")
-            e("lea r12, [pillow_stack + 4096]")
-
+                e("main:")
+                e("lea r12, [pillow_stack + 4096]")
 
     block_type_stack: list[list[GlobalType]] = []
 
@@ -457,39 +467,39 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 d("string_" + str(i) + " db \"" + tok.value + "\", 0")
                 e("spush string_" + str(i))
             case TokenType.ADD:
-                if type_stack[-1] == PillowType.INT:
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
                     e("add rax, rbx")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
                     e("spopsd xmm2")
                     e("spopsd xmm1")
                     e("addsd xmm1, xmm2")
                     e("spushsd xmm1")
             case TokenType.SUB:
-                if type_stack[-1] == PillowType.INT:
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
                     e("sub rax, rbx")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
                     e("spopsd xmm2")
                     e("spopsd xmm1")
                     e("subsd xmm1, xmm2")
                     e("spushsd xmm1")
             case TokenType.MUL:
-                if type_stack[-1] == PillowType.INT:
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
                     e("imul rbx")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
                     e("spopsd xmm1")
                     e("spopsd xmm0")
@@ -520,12 +530,12 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("dec rax")
                 e("spush rax")
             case TokenType.DUP:
-                type_stack.append(type_stack[-1])
+                info.type_stack.append(info.type_stack[-1])
                 e("mov rax, [r12]")
                 e("spush rax")
             case TokenType.SWP:
-                assert len(type_stack) >= 2, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
-                takes = type_stack[-2:]
+                assert len(info.type_stack) >= 2, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
+                takes = info.type_stack[-2:]
                 gives = [takes[1], takes[0]]
                 t(takes, gives)
                 e("spop rax")
@@ -534,8 +544,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("spush rbx")
             case TokenType.ROLL:
                 roll_size = tok.value + 1
-                assert len(type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(type_stack)}"
-                takes = type_stack[-roll_size:]
+                assert len(info.type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(info.type_stack)}"
+                takes = info.type_stack[-roll_size:]
                 gives = [*takes[1:], takes[0]]
                 t(takes, gives)
                 for _ in range(roll_size-1):
@@ -548,15 +558,15 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("spush rbx")
             case TokenType.OVER:
                 over_size = tok.value + 1
-                assert len(type_stack) >= over_size, f"Instruction {tok} takes {over_size} items but found {len(type_stack)}"
-                takes = type_stack[-over_size:]
+                assert len(info.type_stack) >= over_size, f"Instruction {tok} takes {over_size} items but found {len(info.type_stack)}"
+                takes = info.type_stack[-over_size:]
                 gives = [*takes, takes[-1]]
                 t(takes, gives)
                 e("mov rax, [r12+" + str(8*(over_size-1)) + "]")
                 e("spush rax")
             case TokenType.POP:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
-                t([type_stack[-1]], [])
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
+                t([info.type_stack[-1]], [])
                 e("add r12, 8")
             case TokenType.NOT:
                 t([PillowType.INT], [PillowType.INT])
@@ -579,8 +589,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("cmovz rax, rbx")
                 e("spush rax")
             case TokenType.GT:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
-                if type_stack[-1] == PillowType.INT:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
@@ -588,7 +598,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("setg al")
                     e("movzx rax, al")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
                     e("spopsd xmm2")
                     e("spopsd xmm1")
@@ -597,8 +607,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("movzx rax, al")
                     e("spush rax")
             case TokenType.GTE:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
-                if type_stack[-1] == PillowType.INT:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
@@ -606,7 +616,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("setge al")
                     e("movzx rax, al")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
                     e("spopsd xmm2")
                     e("spopsd xmm1")
@@ -615,8 +625,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("movzx rax, al")
                     e("spush rax")
             case TokenType.LT:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
-                if type_stack[-1] == PillowType.INT:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
@@ -624,7 +634,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("setl al")
                     e("movzx rax, al")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
                     e("spopsd xmm2")
                     e("spopsd xmm1")
@@ -633,8 +643,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("movzx rax, al")
                     e("spush rax")
             case TokenType.LTE:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(type_stack)}"
-                if type_stack[-1] == PillowType.INT:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
+                if info.type_stack[-1] == PillowType.INT:
                     t([PillowType.INT, PillowType.INT], [PillowType.INT])
                     e("spop rbx")
                     e("spop rax")
@@ -642,7 +652,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("setle al")
                     e("movzx rax, al")
                     e("spush rax")
-                elif type_stack[-1] == PillowType.FLO:
+                elif info.type_stack[-1] == PillowType.FLO:
                     t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
                     e("spopsd xmm2")
                     e("spopsd xmm1")
@@ -651,8 +661,8 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("movzx rax, al")
                     e("spush rax")
             case TokenType.PRINT:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
-                match type_stack[-1]:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
+                match info.type_stack[-1]:
                     case PillowType.INT:
                         t([PillowType.INT], [])
                         e("spop rax")
@@ -666,10 +676,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         e("spop rax")
                         e("call print_str")
                     case _:
-                        assert False, f"Print expected int or str, found {type_stack[-1]}"
+                        assert False, f"Print expected int or str, found {info.type_stack[-1]}"
             case TokenType.PRINTLN:
-                assert len(type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(type_stack)}"
-                match type_stack[-1]:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
+                match info.type_stack[-1]:
                     case PillowType.INT:
                         t([PillowType.INT], [])
                         e("spop rax")
@@ -683,13 +693,13 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         e("spop rax")
                         e("call print_str")
                     case _:
-                        assert False, f"Println expected int, flo, or str, found {type_stack[-1]}"
+                        assert False, f"Println expected int, flo, or str, found {info.type_stack[-1]}"
                 e("call print_ln")
             case TokenType.DUMP:
-                stack_size = len(type_stack)
+                stack_size = len(info.type_stack)
                 for ind in range(stack_size):
                     offset = (stack_size - 1 - ind) * 8
-                    item_type = type_stack[ind]
+                    item_type = info.type_stack[ind]
                     match item_type:
                         case PillowType.INT:
                             e("mov rax, [r12+" + str(offset) + "]")
@@ -703,9 +713,9 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                     e("call print_spc")
                 e("call print_ln")
             case TokenType.NAME:
-                assert tok.value in [procedure.name for procedure in procedures], f"Undefined procedure {tok.value}"
-                procedure = next((x for x in procedures if x.name == tok.value and (type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
-                assert procedure is not None, f"No overload for {tok.value} matches {type_stack}"
+                assert tok.value in [procedure.name for procedure in info.procedures], f"Undefined procedure {tok.value}"
+                procedure = next((x for x in info.procedures if x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
+                assert procedure is not None, f"No overload for {tok.value} matches {info.type_stack}"
                 t(procedure.takes, procedure.gives)
                 if isinstance(procedure, AsmProcedure):
                     e(procedure.emit())
@@ -714,9 +724,11 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             case TokenType.IMPORT:
                 with open(tok.value, "r") as f:
                     assert not f.closed, f"Could not import file {tok.value}"
-                    assembly, exit_stack, data_section = emit(list(enumerate(lex(f.read()))), None, type_stack.copy(), procedures, structs)
-                    t([], exit_stack)
-                    e(assembly)
+                    import_emit_info = EmitInfo(info.target, False, [], info.procedures, info.structs)
+                    import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
+                    t([], import_emit_info.type_stack)
+                    e(import_assembly)
+                    d(import_data_section)
             case TokenType.PROC | TokenType.ASM:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
@@ -729,7 +741,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         case TokenType.FLO_TYPE: takes_types.append(PillowType.FLO)
                         case TokenType.STR_TYPE: takes_types.append(PillowType.STR)
                         case TokenType.NAME:
-                            struct = next((x for x in structs if x.name == takes_type.value), None)
+                            struct = next((x for x in info.structs if x.name == takes_type.value), None)
                             assert struct is not None, f"Undefined struct {takes_type.value}"
                             takes_types.append(struct)
                         case TokenType.ARROW: break
@@ -744,51 +756,51 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         case TokenType.FLO_TYPE: gives_types.append(PillowType.FLO)
                         case TokenType.STR_TYPE: gives_types.append(PillowType.STR)
                         case TokenType.NAME:
-                            struct = next((x for x in structs if x.name == gives_type.value), None)
+                            struct = next((x for x in info.structs if x.name == gives_type.value), None)
                             assert struct is not None, f"Undefined struct {gives_type.value}"
                             gives_types.append(struct)
                         case TokenType.DO: break
                         case _: assert False, f"Expected type or do but found {gives_type}"
-                already_defined_proc = next((procedure for procedure in procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
+                already_defined_proc = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
                 if already_defined_proc is not None: assert False, f"Procedure {already_defined_proc} is already defined"
-                overload_different_takes = next((procedure for procedure in procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
+                overload_different_takes = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
                 if overload_different_takes is not None: assert False, f"Procedure {overload_different_takes} takes a different number of items"
                 if tok.token_type == TokenType.PROC:
-                    procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                    info.procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
                 else:
-                    procedures.append(AsmProcedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                    info.procedures.append(AsmProcedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
                 while do_i < tok.value: do_i, _ = next(code_iter)
             case TokenType.STRUCT:
                 name_i, struct_name = next(code_iter)
                 assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
                 props: dict[str, PillowType] = {}
-                already_defined_struct = next((struct for struct in structs if struct.name == struct_name.value), None)
-                new_struct = Struct(struct_name.value, code[name_i + 1:tok.value], structs)
-                structs.append(new_struct)
-                procedures.append(StructProcedure(new_struct))
+                already_defined_struct = next((struct for struct in info.structs if struct.name == struct_name.value), None)
+                new_struct = Struct(struct_name.value, code[name_i + 1:tok.value], info.structs)
+                info.structs.append(new_struct)
+                info.procedures.append(StructProcedure(new_struct))
                 for prop_name, prop_type in new_struct.props.items():
-                    procedures.append(StructPropProcedure(new_struct, prop_name))
+                    info.procedures.append(StructPropProcedure(new_struct, prop_name))
                 while name_i < tok.value: name_i, _ = next(code_iter)
             case TokenType.IF:
                 t([PillowType.INT], [])
-                block_type_stack.append(type_stack.copy())
+                block_type_stack.append(info.type_stack.copy())
                 e("spop rax")
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
             case TokenType.ELSE:
                 old_block_type_stack = block_type_stack.pop()
-                block_type_stack.append(type_stack.copy())
-                type_stack = old_block_type_stack
+                block_type_stack.append(info.type_stack.copy())
+                info.type_stack = old_block_type_stack
                 e("jmp label_" + str(tok.value))
                 e("label_" + str(i) + ":")
             case TokenType.WHILE:
-                block_type_stack.append(type_stack.copy())
+                block_type_stack.append(info.type_stack.copy())
                 e("label_" + str(i) + ":")
             case TokenType.THEN:
                 t([PillowType.INT], [])
                 old_block_type_stack = block_type_stack.pop()
-                block_type_stack.append(type_stack.copy())
-                type_stack = old_block_type_stack
+                block_type_stack.append(info.type_stack.copy())
+                info.type_stack = old_block_type_stack
                 e("spop rax")
                 e("test rax, rax")
                 e("jz label_" + str(tok.value))
@@ -797,144 +809,145 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 old_block_type_stack = block_type_stack.pop()
                 match opening_token.token_type:
                     case TokenType.IF:
-                        assert old_block_type_stack == type_stack, f"If statement must leave the stack the same as before\nStarted with {old_block_type_stack} and got {type_stack}"
+                        assert old_block_type_stack == info.type_stack, f"If statement must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
                     case TokenType.ELSE:
-                        assert old_block_type_stack == type_stack, f"If else statement must leave the stack the same in both branches\nIf branch got {old_block_type_stack}, else branch got {type_stack}"
+                        assert old_block_type_stack == info.type_stack, f"If else statement must leave the stack the same in both branches\nIf branch got {old_block_type_stack}, else branch got {info.type_stack}"
                     case TokenType.WHILE:
-                        assert old_block_type_stack == type_stack, f"While loop must leave the stack the same as before\nStarted with {old_block_type_stack} and got {type_stack}"
+                        assert old_block_type_stack == info.type_stack, f"While loop must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
                         e("jmp label_" + str(tok.value))
                 e("label_" + str(i) + ":")
             case _:
                 raise Exception(f"Token type {tok.token_type} not implemented")
 
 
-    match target:
-        case Target.LINUX:
-            e("xor rax, rax")
-            e("call exit")
+    if info.binary:
+        match info.target:
+            case Target.LINUX:
+                e("xor rax, rax")
+                e("call exit")
 
-            e("print_int:")
-            e("push rbp")
-            e("mov rbp, rsp")
-            e("mov rdi, int_fmt")
-            e("mov rsi, rax")
-            e("xor rax, rax")
-            e("call printf")
-            e("leave")
-            e("ret")
+                e("print_int:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("mov rdi, int_fmt")
+                e("mov rsi, rax")
+                e("xor rax, rax")
+                e("call printf")
+                e("leave")
+                e("ret")
 
-            e("print_flo:")
-            e("push rbp")
-            e("mov rbp, rsp")
-            e("sub rsp, 8")
-            e("lea rdi, [flo_fmt]")
-            e("mov eax, 1")
-            e("call printf")
-            e("leave")
-            e("ret")
+                e("print_flo:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 8")
+                e("lea rdi, [flo_fmt]")
+                e("mov eax, 1")
+                e("call printf")
+                e("leave")
+                e("ret")
 
-            e("print_str:")
-            e("push rbp")
-            e("mov rbp, rsp")
-            e("mov rdi, str_fmt")
-            e("mov rsi, rax")
-            e("xor rax, rax")
-            e("call printf")
-            e("leave")
-            e("ret")
+                e("print_str:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("mov rdi, str_fmt")
+                e("mov rsi, rax")
+                e("xor rax, rax")
+                e("call printf")
+                e("leave")
+                e("ret")
 
-            e("print_spc:")
-            e("push rbp")
-            e("mov rbp, rsp")
-            e("sub rsp, 32")
-            e("mov rdi, space")
-            e("xor rax, rax")
-            e("call printf")
-            e("add rsp, 32")
-            e("leave")
-            e("ret")
+                e("print_spc:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 32")
+                e("mov rdi, space")
+                e("xor rax, rax")
+                e("call printf")
+                e("add rsp, 32")
+                e("leave")
+                e("ret")
 
-            e("print_ln:")
-            e("push rbp")
-            e("mov rbp, rsp")
-            e("sub rsp, 32")
-            e("mov rdi, newline")
-            e("xor rax, rax")
-            e("call printf")
-            e("add rsp, 32")
-            e("leave")
-            e("ret")
+                e("print_ln:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 32")
+                e("mov rdi, newline")
+                e("xor rax, rax")
+                e("call printf")
+                e("add rsp, 32")
+                e("leave")
+                e("ret")
 
-            for procedure in procedures:
-                if not isinstance(procedure, AsmProcedure):
-                    proc_code, proc_data = procedure.emit(procedures)
-                    e(proc_code)
-                    d(proc_data)
+                for procedure in info.procedures:
+                    if not isinstance(procedure, AsmProcedure):
+                        proc_code, proc_data = procedure.emit(info)
+                        e(proc_code)
+                        d(proc_data)
 
-            e("section '.bss' writeable")
-            e("pillow_stack rb 4096")
+                e("section '.bss' writeable")
+                e("pillow_stack rb 4096")
 
-            e("section '.data' writeable")
-            e(data_section)
-            e("int_fmt db \"%d\", 0")
-            e("flo_fmt db \"%g\", 0")
-            e("str_fmt db \"%s\", 0")
-            e("space db 32, 0")
-            e("newline db 10, 0")
+                e("section '.data' writeable")
+                e(data_section)
+                e("int_fmt db \"%d\", 0")
+                e("flo_fmt db \"%g\", 0")
+                e("str_fmt db \"%s\", 0")
+                e("space db 32, 0")
+                e("newline db 10, 0")
 
-            e("section '.note.GNU-stack'")
+                e("section '.note.GNU-stack'")
 
-        case Target.WINDOWS:
-            e("xor rcx, rcx")
-            e("call [ExitProcess]")
+            case Target.WINDOWS:
+                e("xor rcx, rcx")
+                e("call [ExitProcess]")
 
-            e("print_int:")
-            e("sub rsp, 32")
-            e("mov rcx, fmt")
-            e("mov rdx, rax")
-            e("call [printf]")
-            e("add rsp, 32")
-            e("ret")
+                e("print_int:")
+                e("sub rsp, 32")
+                e("mov rcx, fmt")
+                e("mov rdx, rax")
+                e("call [printf]")
+                e("add rsp, 32")
+                e("ret")
 
-            e("print_str:")
-            e("sub rsp, 32")
-            e("mov rcx, rax")
-            e("call [printf]")
-            e("add rsp, 32")
-            e("ret")
+                e("print_str:")
+                e("sub rsp, 32")
+                e("mov rcx, rax")
+                e("call [printf]")
+                e("add rsp, 32")
+                e("ret")
 
-            e("print_ln:")
-            e("sub rsp, 32")
-            e("mov rcx, newline")
-            e("call [printf]")
-            e("add rsp, 32")
-            e("ret")
+                e("print_ln:")
+                e("sub rsp, 32")
+                e("mov rcx, newline")
+                e("call [printf]")
+                e("add rsp, 32")
+                e("ret")
 
-            for procedure in procedures:
-                if isinstance(procedure, Procedure):
-                    proc_code, proc_data = procedure.emit(procedures)
-                    e(proc_code)
-                    d(proc_data)
+                for procedure in info.procedures:
+                    if isinstance(procedure, Procedure):
+                        proc_code, proc_data = procedure.emit(info)
+                        e(proc_code)
+                        d(proc_data)
 
-            e("section '.bss' readable writeable")
-            e("pillow_stack rb 4096")
+                e("section '.bss' readable writeable")
+                e("pillow_stack rb 4096")
 
-            e("section '.data' data readable writeable")
-            e(data_section)
-            e("fmt db \"%d\", 0")
-            e("newline db 10, 0")
+                e("section '.data' data readable writeable")
+                e(data_section)
+                e("fmt db \"%d\", 0")
+                e("newline db 10, 0")
 
-            e("section '.idata' import data readable writeable")
-            e("library kernel32, 'kernel32.dll', msvcrt, 'msvcrt.dll'")
-            e("import kernel32, ExitProcess, 'ExitProcess'")
-            e("import msvcrt, printf, 'printf'")
+                e("section '.idata' import data readable writeable")
+                e("library kernel32, 'kernel32.dll', msvcrt, 'msvcrt.dll'")
+                e("import kernel32, ExitProcess, 'ExitProcess'")
+                e("import msvcrt, printf, 'printf'")
 
-    return output, type_stack, data_section
+    return output, data_section
 
 def compile(assembly: str, target: Target, output_path: Path) -> None:
     with open(output_path.with_suffix(".s"), "w") as f:
         f.write(assembly)
-    fasm_result = run([".\\fasm2\\fasm2.cmd" if target == Target.WINDOWS else "./fasm2/fasm2", output_path.with_suffix(".s")], stdout = DEVNULL)
+    fasm_result = run([".\\fasm2\\fasm2.cmd" if target == Target.WINDOWS else "./fasm2/fasm2", "-n", output_path.with_suffix(".s")])
     assert fasm_result.returncode == 0, "Failed to assemble"
     if target == Target.LINUX:
         run(["clang", "-no-pie", output_path.with_suffix(".o"), "-o", output_path.with_suffix("")])
@@ -953,7 +966,7 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        assembly, _, _ = emit(list(enumerate(lex(f.read()))), target)
+        assembly, _ = emit(list(enumerate(lex(f.read()))), EmitInfo(target, True))
         compile(assembly, target, output_file)
 
 
