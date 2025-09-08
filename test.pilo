@@ -108,3 +108,29 @@ end
 -6 -3 > println
 
 4 5 6 7.2 "beans" -4.9 -6 dump
+
+struct Point
+    x flo
+    y flo
+end
+
+2.0 3.0 Point .x println pop
+
+proc invert
+    Point -> Point
+do
+    dup .y swp .x Point
+end
+
+proc point_println
+    Point ->
+do
+    "{x=" print
+    dup .x print
+    " y=" print
+    dup .y print
+    "}" println
+    pop
+end
+
+7.1 9.2 Point dup invert point_println point_println

@@ -50,6 +50,9 @@ strimg cheese
 1
 0
 4 5 6 7.2 beans -4.9 -6 
+2
+{x=9.2 y=7.1}
+{x=7.1 y=9.2}
 """
 
 if result_b.stdout != expected_output:

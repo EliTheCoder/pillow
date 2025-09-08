@@ -36,6 +36,7 @@ class TokenType(Enum):
     POP = auto()
     PROC = auto()
     ASM = auto()
+    STRUCT = auto()
     INT_TYPE = auto()
     FLO_TYPE = auto()
     STR_TYPE = auto()
@@ -50,6 +51,7 @@ class TokenType(Enum):
     THEN = auto()
     END = auto()
 
+primitives = [TokenType.INT_TYPE, TokenType.FLO_TYPE, TokenType.STR_TYPE]
 
 class Token():
     def __init__(self, token_type: TokenType, value: Any = None):
@@ -120,6 +122,10 @@ def lex_token(tok: str, i: int) -> Token:
         token = Token(TokenType.PROC)
         block_stack.append((i, token))
         return token
+    if tok == "struct":
+        token = Token(TokenType.STRUCT)
+        block_stack.append((i, token))
+        return token
     if tok == "asm":
         token = Token(TokenType.ASM)
         block_stack.append((i, token))
@@ -182,14 +188,17 @@ def lex(code: str) -> list[Token]:
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
     return tokens
 
+type GlobalProc = Union[Procedure, AsmProcedure, StructProcedure, StructPropProcedure]
+type GlobalType = Union[PillowType, Struct]
+
 class Procedure():
-    def __init__(self, name: str, takes: list[PillowType], gives: list[PillowType], code: list[tuple[int, Token]]):
+    def __init__(self, name: str, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]]):
         self.name = name
         self.takes = takes
         self.gives = gives
         self.code = code
     
-    def emit(self, procedures: list[Union[Procedure, AsmProcedure]]) -> tuple[str, str]:
+    def emit(self, procedures: list[GlobalProc]) -> tuple[str, str]:
         output = ""
         def e(x: str) -> None:
             nonlocal output
@@ -214,7 +223,7 @@ class Procedure():
         return f"{self.name} {self.takes} -> {self.gives}"
 
 class AsmProcedure():
-    def __init__(self, name: str, takes: list[PillowType], gives: list[PillowType], code: list[tuple[int, Token]]):
+    def __init__(self, name: str, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]]):
         self.name = name
         self.takes = takes
         self.gives = gives
@@ -228,11 +237,112 @@ class AsmProcedure():
     def __repr__(self) -> str:
         return f"{self.name} {self.takes} -> {self.gives}"
 
+class StructProcedure():
+    def __init__(self, struct: Struct):
+        self.name = struct.name
+        self.struct = struct
+        self.takes: list[GlobalType] = list(struct.props.values())
+        self.gives: list[GlobalType] = [struct]
+    
+    def emit(self, procedures: list[GlobalProc]) -> tuple[str, str]:
+        output = ""
+        def e(x: str) -> None:
+            nonlocal output
+            output += x + "\n"
+
+        e(self.proc_name() + ":")
+        e("push rbp")
+        e("mov rbp, rsp")
+        e("mov rdi, " + str(self.struct.size()))
+        e("call malloc")
+        for i in reversed(range(0, len(self.takes))):
+            e("spop rbx")
+            e("mov [rax+" + str(i*8) + "], rbx")
+        e("spush rax")
+        e("leave")
+        e("ret")
+
+        return output, ""
+
+    def proc_name(self) -> str:
+        return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
+    
+    def __repr__(self) -> str:
+        return f"{self.name} {self.takes} -> {self.gives}"
+
+class StructPropProcedure():
+    def __init__(self, struct: Struct, prop: str):
+        self.name = "."+prop
+        self.struct = struct
+        self.prop = prop
+        self.takes: list[GlobalType] = [struct]
+        self.gives: list[GlobalType] = [struct.props[prop]]
+    
+    def emit(self, procedures: list[GlobalProc]) -> tuple[str, str]:
+        output = ""
+        def e(x: str) -> None:
+            nonlocal output
+            output += x + "\n"
+
+        e(self.proc_name() + ":")
+        e("push rbp")
+        e("mov rbp, rsp")
+        e("spop rax")
+        prop_index = list(self.struct.props.keys()).index(self.prop)
+        e("mov rbx, [rax+" + str(prop_index*8) + "]")
+        e("spush rbx")
+        e("leave")
+        e("ret")
+
+        return output, ""
+
+    def proc_name(self) -> str:
+        return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
+    
+    def __repr__(self) -> str:
+        return f"{self.name} {self.takes} -> {self.gives}"
+
+class Struct():
+    def __init__(self, name: str, code: list[tuple[int, Token]], structs: list[Struct]):
+        self.name = name
+        self.props: dict[str, GlobalType] = {}
+
+        toks = [tok for _, tok in code]
+        pairs = list(zip(toks[::2], toks[1::2]))
+        assert len(pairs) % 2 == 0, f"Structs must have name type pairs"
+        for prop_name_tok, prop_type_tok in pairs:
+            assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
+            assert prop_type_tok.token_type in [*primitives, TokenType.NAME], f"Expected property type but found {prop_type_tok}"
+
+            prop_name = prop_name_tok.value
+            assert prop_name not in self.props, f"Struct already has property {prop_name}"
+
+            prop_type: GlobalType
+            match prop_type_tok.token_type:
+                case TokenType.INT_TYPE:
+                    prop_type = PillowType.INT
+                case TokenType.FLO_TYPE:
+                    prop_type = PillowType.FLO
+                case TokenType.STR_TYPE:
+                    prop_type = PillowType.STR
+                case TokenType.NAME:
+                    prop_struct = next((struct for struct in structs if struct.name == prop_type_tok.value), None)
+                    assert prop_struct is not None, f"Undefined type {prop_type_tok.value}"
+                    prop_type = prop_struct
+
+            self.props[prop_name] = prop_type
+
+    def size(self) -> int:
+        return len(self.props)*8
+
+    def __repr__(self) -> str:
+        return f"{self.name}"
+
 class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
-def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[PillowType] = [], procedures: list[Union[Procedure, AsmProcedure]] = []) -> tuple[str, list[PillowType], str]:
+def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[GlobalType] = [], procedures: list[GlobalProc] = [], structs: list[Struct] = []) -> tuple[str, list[GlobalType], str]:
     output = ""
     data_section = ""
 
@@ -244,7 +354,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
         nonlocal data_section
         data_section += x + "\n"
 
-    def type_stack_op(tok: Token, takes: list[PillowType], gives: list[PillowType]) -> None:
+    def type_stack_op(tok: Token, takes: list[GlobalType], gives: list[GlobalType]) -> None:
         nonlocal type_stack
         if len(takes) > 0:
             assert type_stack[-len(takes):] == takes, f"Instruction {tok} takes {takes} but found {type_stack[-len(takes):]}"
@@ -258,6 +368,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("public main")
             e("extrn exit")
             e("extrn printf")
+            e("extrn malloc")
             e("section '.text' executable")
 
             e("macro spush value")
@@ -316,13 +427,13 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("lea r12, [pillow_stack + 4096]")
 
 
-    block_type_stack: list[list[PillowType]] = []
+    block_type_stack: list[list[GlobalType]] = []
 
     code_iter = iter(code)
 
     for i, tok in code_iter:
 
-        def t(takes: list[PillowType], gives: list[PillowType]) -> None:
+        def t(takes: list[GlobalType], gives: list[GlobalType]) -> None:
             type_stack_op(tok, takes, gives)
 
         
@@ -600,25 +711,29 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 procedure = next((x for x in procedures if x.name == tok.value and (type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
                 assert procedure is not None, f"No overload for {tok.value} matches {type_stack}"
                 t(procedure.takes, procedure.gives)
-                if isinstance(procedure, Procedure):
-                    e("call " + procedure.proc_name())
-                else:
+                if isinstance(procedure, AsmProcedure):
                     e(procedure.emit())
+                else:
+                    e("call " + procedure.proc_name())
             case TokenType.PROC | TokenType.ASM:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
                 takes_type = None
-                takes_types: list[PillowType] = []
+                takes_types: list[GlobalType] = []
                 while True:
                     _, takes_type = next(code_iter)
                     match takes_type.token_type:
                         case TokenType.INT_TYPE: takes_types.append(PillowType.INT)
                         case TokenType.FLO_TYPE: takes_types.append(PillowType.FLO)
                         case TokenType.STR_TYPE: takes_types.append(PillowType.STR)
+                        case TokenType.NAME:
+                            struct = next((x for x in structs if x.name == takes_type.value), None)
+                            assert struct is not None, f"Undefined struct {takes_type.value}"
+                            takes_types.append(struct)
                         case TokenType.ARROW: break
                         case _: assert False, f"Expected type or arrow but found {takes_type}"
                 gives_type = None
-                gives_types: list[PillowType] = []
+                gives_types: list[GlobalType] = []
                 do_i = 0
                 while True:
                     do_i, gives_type = next(code_iter)
@@ -626,6 +741,10 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                         case TokenType.INT_TYPE: gives_types.append(PillowType.INT)
                         case TokenType.FLO_TYPE: gives_types.append(PillowType.FLO)
                         case TokenType.STR_TYPE: gives_types.append(PillowType.STR)
+                        case TokenType.NAME:
+                            struct = next((x for x in structs if x.name == gives_type.value), None)
+                            assert struct is not None, f"Undefined struct {gives_type.value}"
+                            gives_types.append(struct)
                         case TokenType.DO: break
                         case _: assert False, f"Expected type or do but found {gives_type}"
                 already_defined_proc = next((procedure for procedure in procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
@@ -637,6 +756,17 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 else:
                     procedures.append(AsmProcedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
                 while do_i < tok.value: do_i, _ = next(code_iter)
+            case TokenType.STRUCT:
+                name_i, struct_name = next(code_iter)
+                assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
+                props: dict[str, PillowType] = {}
+                already_defined_struct = next((struct for struct in structs if struct.name == struct_name.value), None)
+                new_struct = Struct(struct_name.value, code[name_i + 1:tok.value], structs)
+                structs.append(new_struct)
+                procedures.append(StructProcedure(new_struct))
+                for prop_name, prop_type in new_struct.props.items():
+                    procedures.append(StructPropProcedure(new_struct, prop_name))
+                while name_i < tok.value: name_i, _ = next(code_iter)
             case TokenType.IF:
                 t([PillowType.INT], [])
                 block_type_stack.append(type_stack.copy())
@@ -734,7 +864,7 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
             e("ret")
 
             for procedure in procedures:
-                if isinstance(procedure, Procedure):
+                if not isinstance(procedure, AsmProcedure):
                     proc_code, proc_data = procedure.emit(procedures)
                     e(proc_code)
                     d(proc_data)
