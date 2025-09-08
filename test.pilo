@@ -98,9 +98,9 @@ end
 
 2 3 4 rot println println println
 
-1 2 3 4 5 roll4 roll3 print space print space print space print space println
+1 2 3 4 5 roll(4) roll(3) print space print space print space print space println
 
-7 8 9 10 over3 print space print space print space print space println
+7 8 9 10 over(3) print space print space print space print space println
 
 -1.0 -2.0 > println
 -6.0 -3.0 > println

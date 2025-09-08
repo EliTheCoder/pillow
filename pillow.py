@@ -3,6 +3,7 @@
 from __future__ import annotations
 from enum import Enum, auto
 from typing import Any, Union
+from re import fullmatch
 from subprocess import run, DEVNULL
 from sys import argv
 from pathlib import Path
@@ -23,7 +24,6 @@ class TokenType(Enum):
     DEC = auto()
     DUP = auto()
     SWP = auto()
-    ROT = auto()
     ROLL = auto()
     OVER = auto()
     NOT = auto()
@@ -84,6 +84,12 @@ def lex_token(tok: str, i: int) -> Token:
         pass
     if tok.startswith("\"") and tok.endswith("\""): return Token(TokenType.STRING, tok[1:-1])
     tok = tok.lower()
+    comp_value = None
+
+    m = fullmatch(r"(.*)\((.*)\)", tok)
+    if m:
+        tok, comp_value = m.groups()
+
     if tok == "+": return Token(TokenType.ADD)
     if tok == "-": return Token(TokenType.SUB)
     if tok == "*": return Token(TokenType.MUL)
@@ -93,15 +99,10 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "--": return Token(TokenType.DEC)
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
-    if tok == "rot": return Token(TokenType.ROT)
-    if tok == "roll3": return Token(TokenType.ROLL, 3)
-    if tok == "roll4": return Token(TokenType.ROLL, 4)
-    if tok == "roll5": return Token(TokenType.ROLL, 5)
-    if tok == "over": return Token(TokenType.OVER, 1)
-    if tok == "over2": return Token(TokenType.OVER, 2)
-    if tok == "over3": return Token(TokenType.OVER, 3)
-    if tok == "over4": return Token(TokenType.OVER, 4)
-    if tok == "over5": return Token(TokenType.OVER, 5)
+    if tok == "rot": return Token(TokenType.ROLL, 2)
+    if tok == "roll": return Token(TokenType.ROLL, int(comp_value))
+    if tok == "over" and comp_value is None: return Token(TokenType.OVER, 1)
+    if tok == "over": return Token(TokenType.OVER, int(comp_value))
     if tok == "pop": return Token(TokenType.POP)
     if tok == "!": return Token(TokenType.NOT)
     if tok == "||": return Token(TokenType.OR)
@@ -525,17 +526,6 @@ def emit(code: list[tuple[int, Token]], target: Target | None, type_stack: list[
                 e("spop rbx")
                 e("spush rax")
                 e("spush rbx")
-            case TokenType.ROT:
-                assert len(type_stack) >= 3, f"Instruction {tok} takes 3 items but found {len(type_stack)}"
-                takes = type_stack[-3:]
-                gives = [takes[1], takes[2], takes[0]]
-                t(takes, gives)
-                e("spop rax")
-                e("spop rbx")
-                e("spop rdi")
-                e("spush rbx")
-                e("spush rax")
-                e("spush rdi")
             case TokenType.ROLL:
                 roll_size = tok.value + 1
                 assert len(type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(type_stack)}"
