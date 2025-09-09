@@ -2,8 +2,9 @@
 
 import subprocess
 import os
+import sys
 
-result_a = subprocess.run(["python3", "pillow.py", "test.pilo"])
+result_a = subprocess.run([sys.executable, "pillow.py", "test.pilo"])
 assert result_a.returncode == 0
 result_b = subprocess.run(["test.exe" if os.name == "nt" else "./test"], capture_output = True, text = True)
 

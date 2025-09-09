@@ -903,29 +903,55 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("call [ExitProcess]")
 
                 e("print_int:")
-                e("sub rsp, 32")
-                e("mov rcx, fmt")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 0x20")
                 e("mov rdx, rax")
+                e("lea rcx, [int_fmt]")
                 e("call [printf]")
-                e("add rsp, 32")
+                e("leave")
+                e("ret")
+
+                e("print_flo:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 0x20")
+                e("lea rcx, [flo_fmt]")
+                e("call [printf]")
+                e("leave")
                 e("ret")
 
                 e("print_str:")
-                e("sub rsp, 32")
-                e("mov rcx, rax")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 0x20")
+                e("mov rdx, rax")
+                e("lea rcx, [str_fmt]")
                 e("call [printf]")
-                e("add rsp, 32")
+                e("leave")
+                e("ret")
+
+                e("print_spc:")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 0x20")
+                e("lea rcx, [space]")
+                e("call [printf]")
+                e("leave")
                 e("ret")
 
                 e("print_ln:")
-                e("sub rsp, 32")
-                e("mov rcx, newline")
+                e("push rbp")
+                e("mov rbp, rsp")
+                e("sub rsp, 0x20")
+                e("lea rcx, [newline]")
                 e("call [printf]")
-                e("add rsp, 32")
+                e("leave")
                 e("ret")
 
+
                 for procedure in info.procedures:
-                    if isinstance(procedure, Procedure):
+                    if not isinstance(procedure, AsmProcedure):
                         proc_code, proc_data = procedure.emit(info)
                         e(proc_code)
                         d(proc_data)
@@ -935,13 +961,16 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
 
                 e("section '.data' data readable writeable")
                 e(data_section)
-                e("fmt db \"%d\", 0")
+                e("int_fmt db \"%d\", 0")
+                e("flo_fmt db \"%g\", 0")
+                e("str_fmt db \"%s\", 0")
+                e("space db 32, 0")
                 e("newline db 10, 0")
 
                 e("section '.idata' import data readable writeable")
                 e("library kernel32, 'kernel32.dll', msvcrt, 'msvcrt.dll'")
                 e("import kernel32, ExitProcess, 'ExitProcess'")
-                e("import msvcrt, printf, 'printf'")
+                e("import msvcrt, printf, 'printf', malloc, 'malloc'")
 
     return output, data_section
 
