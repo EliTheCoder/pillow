@@ -60,6 +60,10 @@ if result_b.stdout != expected_output:
     print(expected_output)
     print(f"Found this output of length {len(result_b.stdout)}:")
     print(result_b.stdout)
+    with open("test_e.txt", "w") as f:
+        f.write(expected_output)
+    with open("test_f.txt", "w") as f:
+        f.write(result_b.stdout)
 else:
     print("Test passed")
 

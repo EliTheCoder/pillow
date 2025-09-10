@@ -15,24 +15,10 @@ class TokenType(Enum):
     FLOAT = auto()
     STRING = auto()
     NAME = auto()
-    ADD = auto()
-    SUB = auto()
-    MUL = auto()
-    DIV = auto()
-    MOD = auto()
-    INC = auto()
-    DEC = auto()
     DUP = auto()
     SWP = auto()
     ROLL = auto()
     OVER = auto()
-    NOT = auto()
-    OR = auto()
-    AND = auto()
-    GT = auto()
-    GTE = auto()
-    LT = auto()
-    LTE = auto()
     POP = auto()
     IMPORT = auto()
     PROC = auto()
@@ -43,8 +29,6 @@ class TokenType(Enum):
     STR_TYPE = auto()
     ARROW = auto()
     DO = auto()
-    PRINT = auto()
-    PRINTLN = auto()
     DUMP = auto()
     IF = auto()
     ELSE = auto()
@@ -92,28 +76,12 @@ def lex_token(tok: str, i: int) -> Token:
         tok, comp_value = m.groups()
         comp_value = str(comp_value)
 
-    if tok == "+": return Token(TokenType.ADD)
-    if tok == "-": return Token(TokenType.SUB)
-    if tok == "*": return Token(TokenType.MUL)
-    if tok == "/": return Token(TokenType.DIV)
-    if tok == "%": return Token(TokenType.MOD)
-    if tok == "++": return Token(TokenType.INC)
-    if tok == "--": return Token(TokenType.DEC)
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
     if tok == "rot": return Token(TokenType.ROLL, 2)
     if tok == "roll": return Token(TokenType.ROLL, int(comp_value or 2))
     if tok == "over": return Token(TokenType.OVER, int(comp_value or 1))
     if tok == "pop": return Token(TokenType.POP)
-    if tok == "!": return Token(TokenType.NOT)
-    if tok == "||": return Token(TokenType.OR)
-    if tok == "&&": return Token(TokenType.AND)
-    if tok == ">": return Token(TokenType.GT)
-    if tok == ">=": return Token(TokenType.GTE)
-    if tok == "<": return Token(TokenType.LT)
-    if tok == "<=": return Token(TokenType.LTE)
-    if tok == "print": return Token(TokenType.PRINT)
-    if tok == "println": return Token(TokenType.PRINTLN)
     if tok == "dump": return Token(TokenType.DUMP)
     if tok == "int": return Token(TokenType.INT_TYPE)
     if tok == "flo": return Token(TokenType.FLO_TYPE)
@@ -379,6 +347,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             info.type_stack = info.type_stack[:-len(takes)]
         info.type_stack += gives
 
+
     if info.binary:
         match info.target:
             case Target.LINUX:
@@ -445,6 +414,13 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("main:")
                 e("lea r12, [pillow_stack + 4096]")
 
+        with open("./packages/intrinsics.pilo", "r") as f:
+            assert not f.closed, f"Could not import intrinsics"
+            intrinsics_emit_info = EmitInfo(info.target, False)
+            intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read()))), intrinsics_emit_info)
+            e(intrinsics_assembly)
+            d(intrinsics_data_section)
+
     block_type_stack: list[list[GlobalType]] = []
 
     code_iter = iter(code)
@@ -467,69 +443,6 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 t([], [PillowType.STR])
                 d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
                 e("spush " + info.global_prefix + "string_" + str(i))
-            case TokenType.ADD:
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("add rax, rbx")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
-                    e("spopsd xmm2")
-                    e("spopsd xmm1")
-                    e("addsd xmm1, xmm2")
-                    e("spushsd xmm1")
-            case TokenType.SUB:
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("sub rax, rbx")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
-                    e("spopsd xmm2")
-                    e("spopsd xmm1")
-                    e("subsd xmm1, xmm2")
-                    e("spushsd xmm1")
-            case TokenType.MUL:
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("imul rbx")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.FLO])
-                    e("spopsd xmm1")
-                    e("spopsd xmm0")
-                    e("mulsd xmm1, xmm0")
-                    e("spushsd xmm1")
-            case TokenType.DIV:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rbx")
-                e("spop rax")
-                e("cqo")
-                e("idiv rbx")
-                e("spush rax")
-            case TokenType.MOD:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rbx")
-                e("spop rax")
-                e("cqo")
-                e("idiv rbx")
-                e("spush rdx")
-            case TokenType.INC:
-                t([PillowType.INT], [PillowType.INT])
-                e("spop rax")
-                e("inc rax")
-                e("spush rax")
-            case TokenType.DEC:
-                t([PillowType.INT], [PillowType.INT])
-                e("spop rax")
-                e("dec rax")
-                e("spush rax")
             case TokenType.DUP:
                 info.type_stack.append(info.type_stack[-1])
                 e("mov rax, [r12]")
@@ -569,133 +482,6 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
                 t([info.type_stack[-1]], [])
                 e("add r12, 8")
-            case TokenType.NOT:
-                t([PillowType.INT], [PillowType.INT])
-                e("spop rax")
-                e("test rax, rax")
-                e("sete al")
-                e("movzx rax, al")
-                e("spush rax")
-            case TokenType.OR:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rax")
-                e("spop rbx")
-                e("or rax, rbx")
-                e("spush rax")
-            case TokenType.AND:
-                t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                e("spop rax")
-                e("spop rbx")
-                e("test rbx, rbx")
-                e("cmovz rax, rbx")
-                e("spush rax")
-            case TokenType.GT:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("cmp rax, rbx")
-                    e("setg al")
-                    e("movzx rax, al")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
-                    e("spopsd xmm2")
-                    e("spopsd xmm1")
-                    e("comisd xmm1, xmm2")
-                    e("seta al")
-                    e("movzx rax, al")
-                    e("spush rax")
-            case TokenType.GTE:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("cmp rax, rbx")
-                    e("setge al")
-                    e("movzx rax, al")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
-                    e("spopsd xmm2")
-                    e("spopsd xmm1")
-                    e("comisd xmm1, xmm2")
-                    e("setae al")
-                    e("movzx rax, al")
-                    e("spush rax")
-            case TokenType.LT:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("cmp rax, rbx")
-                    e("setl al")
-                    e("movzx rax, al")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
-                    e("spopsd xmm2")
-                    e("spopsd xmm1")
-                    e("comisd xmm1, xmm2")
-                    e("setb al")
-                    e("movzx rax, al")
-                    e("spush rax")
-            case TokenType.LTE:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
-                if info.type_stack[-1] == PillowType.INT:
-                    t([PillowType.INT, PillowType.INT], [PillowType.INT])
-                    e("spop rbx")
-                    e("spop rax")
-                    e("cmp rax, rbx")
-                    e("setle al")
-                    e("movzx rax, al")
-                    e("spush rax")
-                elif info.type_stack[-1] == PillowType.FLO:
-                    t([PillowType.FLO, PillowType.FLO], [PillowType.INT])
-                    e("spopsd xmm2")
-                    e("spopsd xmm1")
-                    e("comisd xmm1, xmm2")
-                    e("setbe al")
-                    e("movzx rax, al")
-                    e("spush rax")
-            case TokenType.PRINT:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
-                match info.type_stack[-1]:
-                    case PillowType.INT:
-                        t([PillowType.INT], [])
-                        e("spop rax")
-                        e("call print_int")
-                    case PillowType.FLO:
-                        t([PillowType.FLO], [])
-                        e("spopsd xmm0")
-                        e("call print_flo")
-                    case PillowType.STR:
-                        t([PillowType.STR], [])
-                        e("spop rax")
-                        e("call print_str")
-                    case _:
-                        assert False, f"Print expected int or str, found {info.type_stack[-1]}"
-            case TokenType.PRINTLN:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
-                match info.type_stack[-1]:
-                    case PillowType.INT:
-                        t([PillowType.INT], [])
-                        e("spop rax")
-                        e("call print_int")
-                    case PillowType.FLO:
-                        t([PillowType.FLO], [])
-                        e("spopsd xmm0")
-                        e("call print_flo")
-                    case PillowType.STR:
-                        t([PillowType.STR], [])
-                        e("spop rax")
-                        e("call print_str")
-                    case _:
-                        assert False, f"Println expected int, flo, or str, found {info.type_stack[-1]}"
-                e("call print_ln")
             case TokenType.DUMP:
                 stack_size = len(info.type_stack)
                 for ind in range(stack_size):

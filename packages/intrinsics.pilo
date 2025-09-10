@@ -1,0 +1,245 @@
+asm +
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "add rax, rbx"
+    "spush rax"
+end
+asm +
+    flo flo -> flo
+do
+    "spopsd xmm2"
+    "spopsd xmm1"
+    "addsd xmm1, xmm2"
+    "spushsd xmm1"
+end
+
+
+asm -
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "sub rax, rbx"
+    "spush rax"
+end
+
+asm -
+    flo flo -> flo
+do
+    "spopsd xmm2"
+    "spopsd xmm1"
+    "subsd xmm1, xmm2"
+    "spushsd xmm1"
+end
+
+asm *
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "imul rbx"
+    "spush rax"
+end
+
+asm *
+    flo flo -> flo
+do
+    "spopsd xmm1"
+    "spopsd xmm0"
+    "mulsd xmm1, xmm0"
+    "spushsd xmm1"
+end
+
+asm /
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "cqo"
+    "idiv rbx"
+    "spush rax"
+end
+
+asm %
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "cqo"
+    "idiv rbx"
+    "spush rdx"
+end
+
+asm ++
+    int -> int
+do
+    "spop rax"
+    "inc rax"
+    "spush rax"
+end
+
+asm --
+    int -> int
+do
+    "spop rax"
+    "dec rax"
+    "spush rax"
+end
+
+
+asm !
+    int -> int
+do
+    "spop rax"
+    "test rax, rax"
+    "sete al"
+    "movzx rax, al"
+    "spush rax"
+end
+
+asm ||
+    int int -> int
+do
+    "spop rax"
+    "spop rbx"
+    "or rax, rbx"
+    "spush rax"
+end
+
+asm &&
+    int int -> int
+do
+    "spop rax"
+    "spop rbx"
+    "test rbx, rbx"
+    "cmovz rax, rbx"
+    "spush rax"
+end
+
+asm >
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "cmp rax, rbx"
+    "setg al"
+    "movzx rax, al"
+    "spush rax"
+end
+asm >
+    flo flo -> int
+do
+    "spopsd xmm2"
+    "spopsd xmm1"
+    "comisd xmm1, xmm2"
+    "seta al"
+    "movzx rax, al"
+    "spush rax"
+end
+
+asm >=
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "cmp rax, rbx"
+    "setge al"
+    "movzx rax, al"
+    "spush rax"
+end
+asm >=
+    flo flo -> int
+do
+    "spopsd xmm2"
+    "spopsd xmm1"
+    "comisd xmm1, xmm2"
+    "setae al"
+    "movzx rax, al"
+    "spush rax"
+end
+
+asm <
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "cmp rax, rbx"
+    "setl al"
+    "movzx rax, al"
+    "spush rax"
+end
+asm <
+    flo flo -> int
+do
+    "spopsd xmm2"
+    "spopsd xmm1"
+    "comisd xmm1, xmm2"
+    "setb al"
+    "movzx rax, al"
+    "spush rax"
+end
+
+asm <=
+    int int -> int
+do
+    "spop rbx"
+    "spop rax"
+    "cmp rax, rbx"
+    "setle al"
+    "movzx rax, al"
+    "spush rax"
+end
+asm <=
+    flo flo -> int
+do
+    "spopsd xmm2"
+    "spopsd xmm1"
+    "comisd xmm1, xmm2"
+    "setbe al"
+    "movzx rax, al"
+    "spush rax"
+end
+
+asm print
+    int ->
+do
+    "spop rax"
+    "call print_int"
+end
+asm print
+    flo ->
+do
+    "spopsd xmm0"
+    "call print_flo"
+end
+asm print
+    str ->
+do
+    "spop rax"
+    "call print_str"
+end
+
+asm print_ln
+    ->
+do
+    "call print_ln"
+end
+
+proc println
+    int ->
+do
+    print print_ln
+end
+proc println
+    flo ->
+do
+    print print_ln
+end
+proc println
+    str ->
+do
+    print print_ln
+end
+
