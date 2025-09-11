@@ -21,6 +21,7 @@ class TokenType(Enum):
     OVER = auto()
     POP = auto()
     IMPORT = auto()
+    EXPORT = auto()
     PROC = auto()
     ASM = auto()
     STRUCT = auto()
@@ -89,6 +90,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "->": return Token(TokenType.ARROW)
     if tok == "do": return Token(TokenType.DO)
     if tok == "import": return Token(TokenType.IMPORT, comp_value)
+    if tok == "export": return Token(TokenType.EXPORT)
     if tok == "proc":
         token = Token(TokenType.PROC)
         block_stack.append((i, token))
@@ -163,15 +165,17 @@ def lex(code: str) -> list[Token]:
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
     return tokens
 
-type GlobalProc = Union[Procedure, AsmProcedure, StructProcedure, StructPropProcedure]
+type GlobalProc = Procedure
 type GlobalType = Union[PillowType, Struct]
 
 class Procedure():
-    def __init__(self, name: str, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]]):
+    def __init__(self, name: str, public: bool, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]], info: EmitInfo):
         self.name = name
+        self.public = public
         self.takes = takes
         self.gives = gives
         self.code = code
+        self.proc_name = info.global_prefix + "_proc_" + self.name + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
@@ -179,12 +183,16 @@ class Procedure():
             nonlocal output
             output += x + "\n"
 
-        proc_emit_info = EmitInfo(info.target, False, "", self.takes.copy(), info.procedures, info.structs)
+        proc_emit_info = EmitInfo(info.target,
+                                  False,
+                                  type_stack=self.takes.copy(),
+                                  procedures=info.procedures,
+                                  structs=info.structs)
         assembly, data_section = emit(self.code, proc_emit_info)
         exit_stack = proc_emit_info.type_stack
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
 
-        e(info.global_prefix + self.proc_name() + ":")
+        e(self.proc_name + ":")
         e("push rbp")
         e("mov rbp, rsp")
         e(assembly)
@@ -192,34 +200,30 @@ class Procedure():
         e("ret")
 
         return output, data_section
-    
-    def proc_name(self) -> str:
-        return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
 
+    def call(self) -> str:
+        return "call " + self.proc_name
+    
     def __repr__(self) -> str:
         return f"{self.name} {self.takes} -> {self.gives}"
 
-class AsmProcedure():
-    def __init__(self, name: str, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]]):
-        self.name = name
-        self.takes = takes
-        self.gives = gives
-        self.code = code
-    
-    def emit(self) -> str:
+class AsmProcedure(Procedure):
+    def emit(self, info: EmitInfo) -> tuple[str, str]:
+        return "", ""
+
+    def call(self) -> str:
         assert all(tok.token_type == TokenType.STRING for _, tok in self.code), "Assembly procedures must have only strings in them"
 
         return "\n".join([tok.value for _, tok in self.code])
-    
-    def __repr__(self) -> str:
-        return f"{self.name} {self.takes} -> {self.gives}"
 
-class StructProcedure():
-    def __init__(self, struct: Struct):
+class StructProcedure(Procedure):
+    def __init__(self, struct: Struct, info: EmitInfo):
         self.name = struct.name
         self.struct = struct
+        self.public = struct.public
         self.takes: list[GlobalType] = list(struct.props.values())
         self.gives: list[GlobalType] = [struct]
+        self.proc_name = info.global_prefix + "_proc_" + self.name + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
@@ -227,7 +231,7 @@ class StructProcedure():
             nonlocal output
             output += x + "\n"
 
-        e(self.proc_name() + ":")
+        e(self.proc_name + ":")
         e("push rbp")
         e("mov rbp, rsp")
         match info.target:
@@ -247,19 +251,15 @@ class StructProcedure():
 
         return output, ""
 
-    def proc_name(self) -> str:
-        return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
-    
-    def __repr__(self) -> str:
-        return f"{self.name} {self.takes} -> {self.gives}"
-
-class StructPropProcedure():
-    def __init__(self, struct: Struct, prop: str):
+class StructPropProcedure(Procedure):
+    def __init__(self, struct: Struct, prop: str, info: EmitInfo):
         self.name = "."+prop
         self.struct = struct
+        self.public = struct.public
         self.prop = prop
         self.takes: list[GlobalType] = [struct]
         self.gives: list[GlobalType] = [struct.props[prop]]
+        self.proc_name = info.global_prefix + "_proc_" + self.name + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
@@ -267,7 +267,7 @@ class StructPropProcedure():
             nonlocal output
             output += x + "\n"
 
-        e(self.proc_name() + ":")
+        e(self.proc_name + ":")
         e("push rbp")
         e("mov rbp, rsp")
         e("spop rax")
@@ -279,15 +279,10 @@ class StructPropProcedure():
 
         return output, ""
 
-    def proc_name(self) -> str:
-        return "proc_" + self.name + "".join("_" + str(x) for x in self.takes)
-    
-    def __repr__(self) -> str:
-        return f"{self.name} {self.takes} -> {self.gives}"
-
 class Struct():
-    def __init__(self, name: str, code: list[tuple[int, Token]], structs: list[Struct]):
+    def __init__(self, name: str, public: bool, code: list[tuple[int, Token]], structs: list[Struct]):
         self.name = name
+        self.public = public
         self.props: dict[str, GlobalType] = {}
 
         toks = [tok for _, tok in code]
@@ -321,18 +316,29 @@ class Struct():
     def __repr__(self) -> str:
         return f"{self.name}"
 
+import traceback
+
 class Target(Enum):
     LINUX = auto()
     WINDOWS = auto()
 
 class EmitInfo():
-    def __init__(self, target: Target, binary: bool = False, global_prefix: str = "", type_stack: list[GlobalType] = [], procedures: list[GlobalProc] = [], structs: list[Struct] = []):
+    def __init__(self,
+                 target: Target,
+                 binary: bool = False,
+                 global_prefix: str = "",
+                 include_intrinsics: bool = True,
+                 type_stack: list[GlobalType] | None = None,
+                 procedures: list[GlobalProc] | None = None,
+                 structs: list[Struct] | None = None,
+                 ):
         self.target = target
         self.binary = binary
         self.global_prefix = global_prefix
-        self.type_stack = type_stack
-        self.procedures = procedures
-        self.structs = structs
+        self.include_intrinsics = include_intrinsics
+        self.type_stack = type_stack or []
+        self.procedures = procedures or []
+        self.structs = structs or []
 
 def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     output = ""
@@ -420,22 +426,25 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("main:")
                 e("lea r12, [pillow_stack + 4096]")
 
+    if info.include_intrinsics:
         with open("./packages/intrinsics.pilo", "r") as f:
             assert not f.closed, f"Could not import intrinsics"
-            intrinsics_emit_info = EmitInfo(info.target, False)
+            intrinsics_emit_info = EmitInfo(info.target, False, include_intrinsics=False)
             intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read()))), intrinsics_emit_info)
-            e(intrinsics_assembly)
-            d(intrinsics_data_section)
+            info.procedures += [p for p in intrinsics_emit_info.procedures if p.public]
+            info.structs += [s for s in intrinsics_emit_info.structs if s.public]
+            if info.binary: d(intrinsics_data_section)
 
     block_type_stack: list[list[GlobalType]] = []
 
     code_iter = iter(code)
 
+    next_public = False
+
     for i, tok in code_iter:
 
         def t(takes: list[GlobalType], gives: list[GlobalType]) -> None:
             type_stack_op(tok, takes, gives)
-
         
         match tok.token_type:
             case TokenType.INTEGER:
@@ -510,18 +519,18 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 procedure = next((x for x in info.procedures if x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
                 assert procedure is not None, f"No overload for {tok.value} matches {info.type_stack}"
                 t(procedure.takes, procedure.gives)
-                if isinstance(procedure, AsmProcedure):
-                    e(procedure.emit())
-                else:
-                    e("call " + procedure.proc_name())
+                e(procedure.call())
             case TokenType.IMPORT:
                 with open(tok.value, "r") as f:
                     assert not f.closed, f"Could not import file {tok.value}"
-                    import_emit_info = EmitInfo(info.target, False, tok.value, [], info.procedures, info.structs)
+                    import_emit_info = EmitInfo(info.target, False, tok.value)
                     import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
-                    t([], import_emit_info.type_stack)
-                    e(import_assembly)
+                    info.procedures += [p for p in import_emit_info.procedures if p.public]
+                    info.structs += [s for s in import_emit_info.structs if s.public]
                     d(import_data_section)
+            case TokenType.EXPORT:
+                assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
+                next_public = True
             case TokenType.PROC | TokenType.ASM:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
@@ -559,21 +568,23 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 overload_different_takes = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
                 if overload_different_takes is not None: assert False, f"Procedure {overload_different_takes} takes a different number of items"
                 if tok.token_type == TokenType.PROC:
-                    info.procedures.append(Procedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                    info.procedures.append(Procedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
                 else:
-                    info.procedures.append(AsmProcedure(proc_name.value, takes_types, gives_types, code[do_i + 1:tok.value]))
+                    info.procedures.append(AsmProcedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
                 while do_i < tok.value: do_i, _ = next(code_iter)
+                next_public = False
             case TokenType.STRUCT:
                 name_i, struct_name = next(code_iter)
                 assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
                 props: dict[str, PillowType] = {}
                 already_defined_struct = next((struct for struct in info.structs if struct.name == struct_name.value), None)
-                new_struct = Struct(struct_name.value, code[name_i + 1:tok.value], info.structs)
+                new_struct = Struct(struct_name.value, next_public, code[name_i + 1:tok.value], info.structs)
                 info.structs.append(new_struct)
-                info.procedures.append(StructProcedure(new_struct))
+                info.procedures.append(StructProcedure(new_struct, info))
                 for prop_name, prop_type in new_struct.props.items():
-                    info.procedures.append(StructPropProcedure(new_struct, prop_name))
+                    info.procedures.append(StructPropProcedure(new_struct, prop_name, info))
                 while name_i < tok.value: name_i, _ = next(code_iter)
+                next_public = False
             case TokenType.IF:
                 t([PillowType.INT], [])
                 block_type_stack.append(info.type_stack.copy())
@@ -672,10 +683,9 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("ret")
 
                 for procedure in info.procedures:
-                    if not isinstance(procedure, AsmProcedure):
-                        proc_code, proc_data = procedure.emit(info)
-                        e(proc_code)
-                        d(proc_data)
+                    proc_code, proc_data = procedure.emit(info)
+                    e(proc_code)
+                    d(proc_data)
 
                 e("section '.bss' writeable")
                 e("pillow_stack rb 4096")
@@ -744,10 +754,9 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
 
 
                 for procedure in info.procedures:
-                    if not isinstance(procedure, AsmProcedure):
-                        proc_code, proc_data = procedure.emit(info)
-                        e(proc_code)
-                        d(proc_data)
+                    proc_code, proc_data = procedure.emit(info)
+                    e(proc_code)
+                    d(proc_data)
 
                 e("section '.bss' readable writeable")
                 e("pillow_stack rb 4096")
@@ -789,7 +798,7 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        assembly, _ = emit(list(enumerate(lex(f.read()))), EmitInfo(target, True))
+        assembly, _ = emit(list(enumerate(lex(f.read()))), EmitInfo(target, True, procedures=[]))
         compile(assembly, target, output_file)
 
 

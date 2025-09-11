@@ -1,4 +1,4 @@
-asm +
+export asm +
     int int -> int
 do
     "spop rbx"
@@ -6,7 +6,7 @@ do
     "add rax, rbx"
     "spush rax"
 end
-asm +
+export asm +
     flo flo -> flo
 do
     "spopsd xmm2"
@@ -16,7 +16,7 @@ do
 end
 
 
-asm -
+export asm -
     int int -> int
 do
     "spop rbx"
@@ -24,8 +24,7 @@ do
     "sub rax, rbx"
     "spush rax"
 end
-
-asm -
+export asm -
     flo flo -> flo
 do
     "spopsd xmm2"
@@ -34,7 +33,7 @@ do
     "spushsd xmm1"
 end
 
-asm *
+export asm *
     int int -> int
 do
     "spop rbx"
@@ -42,7 +41,7 @@ do
     "imul rbx"
     "spush rax"
 end
-asm *
+export asm *
     flo flo -> flo
 do
     "spopsd xmm2"
@@ -51,7 +50,7 @@ do
     "spushsd xmm1"
 end
 
-asm /
+export asm /
     int int -> int
 do
     "spop rbx"
@@ -61,7 +60,7 @@ do
     "spush rax"
 end
 
-asm %
+export asm %
     int int -> int
 do
     "spop rbx"
@@ -71,7 +70,7 @@ do
     "spush rdx"
 end
 
-asm ++
+export asm ++
     int -> int
 do
     "spop rax"
@@ -79,7 +78,7 @@ do
     "spush rax"
 end
 
-asm --
+export asm --
     int -> int
 do
     "spop rax"
@@ -88,7 +87,7 @@ do
 end
 
 
-asm !
+export asm !
     int -> int
 do
     "spop rax"
@@ -98,7 +97,7 @@ do
     "spush rax"
 end
 
-asm ||
+export asm ||
     int int -> int
 do
     "spop rax"
@@ -107,7 +106,7 @@ do
     "spush rax"
 end
 
-asm &&
+export asm &&
     int int -> int
 do
     "spop rax"
@@ -117,7 +116,7 @@ do
     "spush rax"
 end
 
-asm >
+export asm >
     int int -> int
 do
     "spop rbx"
@@ -127,7 +126,7 @@ do
     "movzx rax, al"
     "spush rax"
 end
-asm >
+export asm >
     flo flo -> int
 do
     "spopsd xmm2"
@@ -138,7 +137,7 @@ do
     "spush rax"
 end
 
-asm >=
+export asm >=
     int int -> int
 do
     "spop rbx"
@@ -148,7 +147,7 @@ do
     "movzx rax, al"
     "spush rax"
 end
-asm >=
+export asm >=
     flo flo -> int
 do
     "spopsd xmm2"
@@ -159,7 +158,7 @@ do
     "spush rax"
 end
 
-asm <
+export asm <
     int int -> int
 do
     "spop rbx"
@@ -169,7 +168,7 @@ do
     "movzx rax, al"
     "spush rax"
 end
-asm <
+export asm <
     flo flo -> int
 do
     "spopsd xmm2"
@@ -180,7 +179,7 @@ do
     "spush rax"
 end
 
-asm <=
+export asm <=
     int int -> int
 do
     "spop rbx"
@@ -190,7 +189,7 @@ do
     "movzx rax, al"
     "spush rax"
 end
-asm <=
+export asm <=
     flo flo -> int
 do
     "spopsd xmm2"
@@ -201,42 +200,42 @@ do
     "spush rax"
 end
 
-asm print
+export asm print
     int ->
 do
     "spop rax"
     "call print_int"
 end
-asm print
+export asm print
     flo ->
 do
     "spopsd xmm0"
     "call print_flo"
 end
-asm print
+export asm print
     str ->
 do
     "spop rax"
     "call print_str"
 end
 
-asm print_ln
+export asm print_ln
     ->
 do
     "call print_ln"
 end
 
-proc println
+export proc println
     int ->
 do
     print print_ln
 end
-proc println
+export proc println
     flo ->
 do
     print print_ln
 end
-proc println
+export proc println
     str ->
 do
     print print_ln
