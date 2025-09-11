@@ -230,8 +230,14 @@ class StructProcedure():
         e(self.proc_name() + ":")
         e("push rbp")
         e("mov rbp, rsp")
-        e("mov rdi, " + str(self.struct.size()))
-        e("call malloc")
+        match info.target:
+            case Target.LINUX:
+                e("mov rdi, " + str(self.struct.size()))
+                e("call malloc")
+            case Target.WINDOWS:
+                e("sub rsp, 0x20")
+                e("mov rcx, " + str(self.struct.size()))
+                e("call [malloc]")
         for i in reversed(range(0, len(self.takes))):
             e("spop rbx")
             e("mov [rax+" + str(i*8) + "], rbx")
@@ -702,6 +708,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("push rbp")
                 e("mov rbp, rsp")
                 e("sub rsp, 0x20")
+                e("movq rdx, xmm0")
                 e("lea rcx, [flo_fmt]")
                 e("call [printf]")
                 e("leave")

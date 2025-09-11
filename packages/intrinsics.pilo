@@ -42,13 +42,12 @@ do
     "imul rbx"
     "spush rax"
 end
-
 asm *
     flo flo -> flo
 do
+    "spopsd xmm2"
     "spopsd xmm1"
-    "spopsd xmm0"
-    "mulsd xmm1, xmm0"
+    "mulsd xmm1, xmm2"
     "spushsd xmm1"
 end
 
