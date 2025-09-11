@@ -185,6 +185,7 @@ class Procedure():
 
         proc_emit_info = EmitInfo(info.target,
                                   False,
+                                  include_intrinsics=False,
                                   type_stack=self.takes.copy(),
                                   procedures=info.procedures,
                                   structs=info.structs)
@@ -315,8 +316,6 @@ class Struct():
 
     def __repr__(self) -> str:
         return f"{self.name}"
-
-import traceback
 
 class Target(Enum):
     LINUX = auto()
