@@ -14,6 +14,7 @@ class TokenType(Enum):
     INTEGER = auto()
     FLOAT = auto()
     STRING = auto()
+    DEBUG = auto()
     NAME = auto()
     DUP = auto()
     SWP = auto()
@@ -77,6 +78,7 @@ def lex_token(tok: str, i: int) -> Token:
         tok, comp_value = m.groups()
         comp_value = str(comp_value)
 
+    if tok == "?": return Token(TokenType.DEBUG)
     if tok == "dup": return Token(TokenType.DUP)
     if tok == "swp": return Token(TokenType.SWP)
     if tok == "rot": return Token(TokenType.ROLL, 2)
@@ -466,6 +468,8 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 t([], [PillowType.STR])
                 d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
                 e("spush " + info.global_prefix + "string_" + str(i))
+            case TokenType.DEBUG:
+                print(info.type_stack)
             case TokenType.DUP:
                 info.type_stack.append(info.type_stack[-1])
                 e("mov rax, [r12]")
