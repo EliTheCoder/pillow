@@ -1,0 +1,102 @@
+struct list
+    data int
+    length int
+    capacity int
+end
+
+proc deconstruct
+    list -> int int int
+do
+    dup .data swp
+    dup .length swp
+    dup .capacity swp
+    pop
+end
+
+proc push
+    list int -> list
+do
+    swp
+    dup deconstruct
+    rot pop >=
+    if
+        dup .capacity
+        0 == if
+            deconstruct
+            pop 256
+        else
+            deconstruct
+            2 *
+        end
+        rot
+        over realloc
+        rot rot
+        list
+    end
+
+    deconstruct
+    over(2) over(2)
+    8 * +
+    roll(4)
+    set
+    swp ++ swp
+    list
+end
+
+asm realloc
+    int int -> int
+do
+    "spop rsi"
+    "spop rdi"
+    "call realloc"
+    "spush rax"
+end
+
+asm set
+    int int ->
+do
+    "spop rbx"
+    "spop rax"
+    "mov [rax], rbx"
+end
+
+asm get
+    int -> int
+do
+    "spop rax"
+    "mov rbx, [rax]"
+    "spush rbx"
+end
+
+proc index
+    list int -> int
+do
+    8 *
+    swp .data
+    + get
+end
+
+proc print
+    list ->
+do
+    "[ " print
+    dup .length
+    0 while over over swp < then
+        over(2) over index print
+        " " print
+        ++
+    end
+    "]" print
+    pop pop pop
+end
+
+proc println
+    list ->
+do
+    print
+    "" println
+end
+
+0 0 0 list
+10 push 12 push 9 push
+println
