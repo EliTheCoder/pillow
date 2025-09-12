@@ -371,71 +371,11 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
 
 
     if info.binary:
-        match info.target:
-            case Target.LINUX:
-                e("format ELF64")
-
-                e("public main")
-                e("extrn exit")
-                e("extrn printf")
-                e("extrn malloc")
-                e("extrn realloc")
-                e("section '.text' executable")
-
-                e("macro spush value")
-                e("    sub r12, 8")
-                e("    mov r8, value")
-                e("    mov qword [r12], r8")
-                e("end macro")
-
-                e("macro spop value")
-                e("    mov value, qword [r12]")
-                e("    add r12, 8")
-                e("end macro")
-
-                e("macro spushsd xmmreg")
-                e("    sub r12, 8")
-                e("    movq [r12], xmmreg")
-                e("end macro")
-
-                e("macro spopsd xmmreg")
-                e("    movq xmmreg, [r12]")
-                e("    add r12, 8")
-                e("end macro")
-
-                e("main:")
-                e("lea r12, [pillow_stack + 4096]")
-
-            case Target.WINDOWS:
-                e("format PE64")
-                e("entry main")
-
-                e("include 'win64a.inc'")
-                e("section '.text' code executable")
-
-                e("macro spush value")
-                e("    sub r12, 8")
-                e("    mov rax, value")
-                e("    mov qword [r12], rax")
-                e("end macro")
-
-                e("macro spop value")
-                e("    mov value, qword [r12]")
-                e("    add r12, 8")
-                e("end macro")
-
-                e("macro spushsd xmmreg")
-                e("    sub r12, 8")
-                e("    movq [r12], xmmreg")
-                e("end macro")
-
-                e("macro spopsd xmmreg")
-                e("    movq xmmreg, [r12]")
-                e("    add r12, 8")
-                e("end macro")
-
-                e("main:")
-                e("lea r12, [pillow_stack + 4096]")
+        if info.target == Target.LINUX:
+            e("TARGET = 0")
+        else:
+            e("TARGET = 1")
+        e("include 'components/header.inc'")
 
     if info.include_intrinsics:
         with open("./packages/intrinsics.pilo", "r") as f:
@@ -636,156 +576,16 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             case _:
                 raise Exception(f"Token type {tok.token_type} not implemented")
 
-
     if info.binary:
-        match info.target:
-            case Target.LINUX:
-                e("xor rax, rax")
-                e("call exit")
+        e("jmp pillow_exit")
 
-                e("print_int:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("mov rdi, int_fmt")
-                e("mov rsi, rax")
-                e("xor rax, rax")
-                e("call printf")
-                e("leave")
-                e("ret")
+        for procedure in info.procedures:
+            proc_code, proc_data = procedure.emit(info)
+            e(proc_code)
+            d(proc_data)
 
-                e("print_flo:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 8")
-                e("lea rdi, [flo_fmt]")
-                e("mov eax, 1")
-                e("call printf")
-                e("leave")
-                e("ret")
-
-                e("print_str:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("mov rdi, str_fmt")
-                e("mov rsi, rax")
-                e("xor rax, rax")
-                e("call printf")
-                e("leave")
-                e("ret")
-
-                e("print_spc:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 32")
-                e("mov rdi, space")
-                e("xor rax, rax")
-                e("call printf")
-                e("add rsp, 32")
-                e("leave")
-                e("ret")
-
-                e("print_ln:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 32")
-                e("mov rdi, newline")
-                e("xor rax, rax")
-                e("call printf")
-                e("add rsp, 32")
-                e("leave")
-                e("ret")
-
-                for procedure in info.procedures:
-                    proc_code, proc_data = procedure.emit(info)
-                    e(proc_code)
-                    d(proc_data)
-
-                e("section '.bss' writeable")
-                e("pillow_stack rb 4096")
-
-                e("section '.data' writeable")
-                e(data_section)
-                e("int_fmt db \"%d\", 0")
-                e("flo_fmt db \"%g\", 0")
-                e("str_fmt db \"%s\", 0")
-                e("space db 32, 0")
-                e("newline db 10, 0")
-
-                e("section '.note.GNU-stack'")
-
-            case Target.WINDOWS:
-                e("xor rcx, rcx")
-                e("call [ExitProcess]")
-
-                e("print_int:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 0x20")
-                e("mov rdx, rax")
-                e("lea rcx, [int_fmt]")
-                e("call [printf]")
-                e("leave")
-                e("ret")
-
-                e("print_flo:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 0x20")
-                e("movq rdx, xmm0")
-                e("lea rcx, [flo_fmt]")
-                e("call [printf]")
-                e("leave")
-                e("ret")
-
-                e("print_str:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 0x20")
-                e("mov rdx, rax")
-                e("lea rcx, [str_fmt]")
-                e("call [printf]")
-                e("leave")
-                e("ret")
-
-                e("print_spc:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 0x20")
-                e("lea rcx, [space]")
-                e("call [printf]")
-                e("leave")
-                e("ret")
-
-                e("print_ln:")
-                e("push rbp")
-                e("mov rbp, rsp")
-                e("sub rsp, 0x20")
-                e("lea rcx, [newline]")
-                e("call [printf]")
-                e("leave")
-                e("ret")
-
-
-                for procedure in info.procedures:
-                    proc_code, proc_data = procedure.emit(info)
-                    e(proc_code)
-                    d(proc_data)
-
-                e("section '.bss' readable writeable")
-                e("pillow_stack rb 4096")
-
-                e("section '.data' data readable writeable")
-                e(data_section)
-                e("int_fmt db \"%d\", 0")
-                e("flo_fmt db \"%g\", 0")
-                e("str_fmt db \"%s\", 0")
-                e("space db 32, 0")
-                e("newline db 10, 0")
-
-                e("section '.idata' import data readable writeable")
-                e("library kernel32, 'kernel32.dll', msvcrt, 'msvcrt.dll'")
-                e("import kernel32, ExitProcess, 'ExitProcess'")
-                e("import msvcrt, printf, 'printf', malloc, 'malloc'")
+        e("include 'components/footer.inc'")
+        e(data_section)
 
     return output, data_section
 
