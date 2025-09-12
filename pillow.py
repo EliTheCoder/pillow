@@ -239,7 +239,7 @@ class StructProcedure(Procedure):
         self.public = struct.public
         self.takes: list[GlobalType] = list(struct.props.values())
         self.gives: list[GlobalType] = [struct]
-        self.proc_name = info.global_prefix + "_proc_" + self.name + "".join("_" + str(x) for x in self.takes)
+        self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
@@ -276,7 +276,7 @@ class StructPropProcedure(Procedure):
         self.prop = prop
         self.takes: list[GlobalType] = [struct]
         self.gives: list[GlobalType] = [struct.props[prop]]
-        self.proc_name = info.global_prefix + "_proc_" + self.name + "".join("_" + str(x) for x in self.takes)
+        self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
@@ -297,8 +297,9 @@ class StructPropProcedure(Procedure):
         return output, ""
 
 class Struct():
-    def __init__(self, name: str, public: bool, code: list[tuple[int, Token]], structs: list[Struct]):
+    def __init__(self, name: str, public: bool, code: list[tuple[int, Token]], info: EmitInfo):
         self.name = name
+        self.source_file = info.source_file
         self.public = public
         self.props: dict[str, GlobalType] = {}
 
@@ -321,7 +322,7 @@ class Struct():
                 case TokenType.STR_TYPE:
                     prop_type = PillowType.STR
                 case TokenType.NAME:
-                    prop_struct = next((struct for struct in structs if struct.name == prop_type_tok.value), None)
+                    prop_struct = next((struct for struct in info.structs if struct.name == prop_type_tok.value), None)
                     assert prop_struct is not None, f"Undefined type {prop_type_tok.value}"
                     prop_type = prop_struct
 
@@ -541,7 +542,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
                 props: dict[str, PillowType] = {}
                 already_defined_struct = next((struct for struct in info.structs if struct.name == struct_name.value), None)
-                new_struct = Struct(struct_name.value, next_public, code[name_i + 1:tok.value], info.structs)
+                new_struct = Struct(struct_name.value, next_public, code[name_i + 1:tok.value], info)
                 info.structs.append(new_struct)
                 info.procedures.append(StructProcedure(new_struct, info))
                 for prop_name, prop_type in new_struct.props.items():
