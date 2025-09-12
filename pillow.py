@@ -298,8 +298,8 @@ class Struct():
         self.props: dict[str, GlobalType] = {}
 
         toks = [tok for _, tok in code]
+        assert len(toks) % 2 == 0, f"Structs must have name type pairs"
         pairs = list(zip(toks[::2], toks[1::2]))
-        assert len(pairs) % 2 == 0, f"Structs must have name type pairs"
         for prop_name_tok, prop_type_tok in pairs:
             assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
             assert prop_type_tok.token_type in [*primitives, TokenType.NAME], f"Expected property type but found {prop_type_tok}"
