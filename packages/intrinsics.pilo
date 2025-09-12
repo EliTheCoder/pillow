@@ -219,7 +219,7 @@ do
     "call print_str"
 end
 
-export asm print_ln
+asm print_ln
     ->
 do
     "call print_ln"

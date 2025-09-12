@@ -186,6 +186,7 @@ class Procedure():
         self.takes = takes
         self.gives = gives
         self.code = code
+        self.source_file = info.source_file
         self.proc_name = info.global_prefix + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
@@ -194,7 +195,9 @@ class Procedure():
             nonlocal output
             output += x + "\n"
 
-        proc_emit_info = EmitInfo(info.target,
+        proc_emit_info = EmitInfo(
+                                  self.source_file,
+                                  info.target,
                                   False,
                                   include_intrinsics=False,
                                   type_stack=self.takes.copy(),
@@ -231,6 +234,7 @@ class AsmProcedure(Procedure):
 class StructProcedure(Procedure):
     def __init__(self, struct: Struct, info: EmitInfo):
         self.name = struct.name
+        self.source_file = info.source_file
         self.struct = struct
         self.public = struct.public
         self.takes: list[GlobalType] = list(struct.props.values())
@@ -266,6 +270,7 @@ class StructProcedure(Procedure):
 class StructPropProcedure(Procedure):
     def __init__(self, struct: Struct, prop: str, info: EmitInfo):
         self.name = "."+prop
+        self.source_file = info.source_file
         self.struct = struct
         self.public = struct.public
         self.prop = prop
@@ -334,6 +339,7 @@ class Target(Enum):
 
 class EmitInfo():
     def __init__(self,
+                 source_file: str,
                  target: Target,
                  binary: bool = False,
                  global_prefix: str = "",
@@ -342,6 +348,7 @@ class EmitInfo():
                  procedures: list[GlobalProc] | None = None,
                  structs: list[Struct] | None = None,
                  ):
+        self.source_file = source_file
         self.target = target
         self.binary = binary
         self.global_prefix = global_prefix
@@ -380,10 +387,10 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     if info.include_intrinsics:
         with open("./packages/intrinsics.pilo", "r") as f:
             assert not f.closed, f"Could not import intrinsics"
-            intrinsics_emit_info = EmitInfo(info.target, False, include_intrinsics=False)
+            intrinsics_emit_info = EmitInfo(os.path.abspath("./packages/intrinsics.pilo"), info.target, False, include_intrinsics=False)
             intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read()))), intrinsics_emit_info)
-            info.procedures += [p for p in intrinsics_emit_info.procedures if p.public]
-            info.structs += [s for s in intrinsics_emit_info.structs if s.public]
+            info.procedures += intrinsics_emit_info.procedures
+            info.structs += intrinsics_emit_info.structs
             if info.binary: d(intrinsics_data_section)
 
     block_type_stack: list[list[GlobalType]] = []
@@ -468,18 +475,18 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     e("call print_spc")
                 e("call print_ln")
             case TokenType.NAME:
-                assert tok.value in [procedure.name for procedure in info.procedures], f"Undefined procedure {tok.value}"
-                procedure = next((x for x in info.procedures if x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
+                assert tok.value in [procedure.name for procedure in info.procedures if procedure.public or procedure.source_file == info.source_file], f"Undefined procedure {tok.value}"
+                procedure = next((x for x in info.procedures if (x.public or x.source_file == info.source_file) and x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
                 assert procedure is not None, f"No overload for {tok.value} matches {info.type_stack}"
                 t(procedure.takes, procedure.gives)
                 e(procedure.call())
             case TokenType.IMPORT:
                 with open(tok.value, "r") as f:
                     assert not f.closed, f"Could not import file {tok.value}"
-                    import_emit_info = EmitInfo(info.target, False, tok.value)
+                    import_emit_info = EmitInfo(os.path.abspath(tok.value), info.target, False, tok.value)
                     import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
-                    info.procedures += [p for p in import_emit_info.procedures if p.public]
-                    info.structs += [s for s in import_emit_info.structs if s.public]
+                    info.procedures += import_emit_info.procedures
+                    info.structs += import_emit_info.structs
                     d(import_data_section)
             case TokenType.EXPORT:
                 assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
@@ -611,7 +618,7 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        assembly, _ = emit(list(enumerate(lex(f.read()))), EmitInfo(target, True, procedures=[]))
+        assembly, _ = emit(list(enumerate(lex(f.read()))), EmitInfo(os.path.abspath(argv[-1]), target, True, procedures=[]))
         compile(assembly, target, output_file)
 
 
