@@ -379,6 +379,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("extrn exit")
                 e("extrn printf")
                 e("extrn malloc")
+                e("extrn realloc")
                 e("section '.text' executable")
 
                 e("macro spush value")
