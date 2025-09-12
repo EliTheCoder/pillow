@@ -502,7 +502,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 over_size = tok.value + 1
                 assert len(info.type_stack) >= over_size, f"Instruction {tok} takes {over_size} items but found {len(info.type_stack)}"
                 takes = info.type_stack[-over_size:]
-                gives = [*takes, takes[-1]]
+                gives = [*takes, takes[0]]
                 t(takes, gives)
                 e("mov rax, [r12+" + str(8*(over_size-1)) + "]")
                 e("spush rax")
