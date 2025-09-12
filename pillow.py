@@ -168,6 +168,15 @@ def lex(code: str) -> list[Token]:
 type GlobalProc = Procedure
 type GlobalType = Union[PillowType, Struct]
 
+def fasm_ident_safe(s: str) -> str:
+    out = []
+    for ch in s:
+        if fullmatch(r"[a-zA-Z_]", ch):
+            out.append(ch)
+        else:
+            out.append(f"_u{ord(ch):04X}_")
+    return "".join(out)
+
 class Procedure():
     def __init__(self, name: str, public: bool, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]], info: EmitInfo):
         self.name = name
@@ -175,7 +184,7 @@ class Procedure():
         self.takes = takes
         self.gives = gives
         self.code = code
-        self.proc_name = info.global_prefix + "_proc_" + self.name + "".join("_" + str(x) for x in self.takes)
+        self.proc_name = info.global_prefix + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
