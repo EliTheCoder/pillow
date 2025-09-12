@@ -187,7 +187,7 @@ class Procedure():
         self.gives = gives
         self.code = code
         self.source_file = info.source_file
-        self.proc_name = info.global_prefix + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
+        self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
         output = ""
@@ -360,6 +360,7 @@ class EmitInfo():
 def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     output = ""
     data_section = ""
+    imports: list[str] =  []
 
     def e(x: str) -> None:
         nonlocal output
@@ -391,6 +392,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read()))), intrinsics_emit_info)
             info.procedures += intrinsics_emit_info.procedures
             info.structs += intrinsics_emit_info.structs
+            imports.append(os.path.abspath("./packages/intrinsics.pilo"))
             if info.binary: d(intrinsics_data_section)
 
     block_type_stack: list[list[GlobalType]] = []
@@ -485,8 +487,9 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     assert not f.closed, f"Could not import file {tok.value}"
                     import_emit_info = EmitInfo(os.path.abspath(tok.value), info.target, False, tok.value)
                     import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
-                    info.procedures += import_emit_info.procedures
-                    info.structs += import_emit_info.structs
+                    info.procedures += [p for p in import_emit_info.procedures if p.source_file not in imports]
+                    info.structs += [s for s in import_emit_info.structs if s.source_file not in imports]
+                    imports.append(os.path.abspath(tok.value))
                     d(import_data_section)
             case TokenType.EXPORT:
                 assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
