@@ -241,3 +241,8 @@ do
     print print_ln
 end
 
+export proc ==
+    int int -> int
+do
+    - !
+end
