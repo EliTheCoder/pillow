@@ -1,10 +1,16 @@
-struct list
+export struct list
     data int
     length int
     capacity int
 end
 
-proc deconstruct
+export proc new_list
+    -> list
+do
+    0 0 0 list
+end
+
+export proc deconstruct
     list -> int int int
 do
     dup .data swp
@@ -13,7 +19,7 @@ do
     pop
 end
 
-proc push
+export proc push
     list int -> list
 do
     swp
@@ -68,7 +74,7 @@ do
     "spush rbx"
 end
 
-proc index
+export proc index
     list int -> int
 do
     8 *
@@ -76,7 +82,7 @@ do
     + get
 end
 
-proc print
+export proc print
     list ->
 do
     "[ " print
@@ -90,13 +96,9 @@ do
     pop pop pop
 end
 
-proc println
+export proc println
     list ->
 do
     print
     "" println
 end
-
-0 0 0 list
-10 push 12 push 9 push
-println
