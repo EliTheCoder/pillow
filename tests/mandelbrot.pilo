@@ -37,10 +37,10 @@ do
     0 while dup 1000 < then
         rot rot
         complex_square
-        over4 over4 complex_add
+        over(4) over(4) complex_add
         over over complex_magnitude_squared
         4.0 >
-        roll3 ++ swp if pop 1000 end
+        roll(3) ++ swp if pop 1000 end
     end
     pop complex_magnitude_squared
     4.0 > if

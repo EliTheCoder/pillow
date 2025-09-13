@@ -4,17 +4,10 @@ proc elementary
     int int int -> int
 do
     if
-        if
-            !
-        else
-        end
+        if ! else end
     else
-        if
-            pop 1
-        else
-        end
+        if pop 1 else end
     end
-
 end
 
 proc rule124
