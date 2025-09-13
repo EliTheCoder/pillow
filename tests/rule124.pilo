@@ -1,0 +1,69 @@
+import(packages/list.pilo)
+
+proc elementary
+    int int int -> int
+do
+    if
+        if
+            !
+        else
+        end
+    else
+        if
+            pop 1
+        else
+        end
+    end
+
+end
+
+proc rule124
+    list -> list
+do
+    new_list
+    1 push
+
+    0 while dup over(3) .length 3 - <= then
+        dup over(3)
+        dup over(2) 0 + index rot rot
+        dup over(2) 1 + index rot rot
+        dup over(2) 2 + index rot rot
+        pop pop
+
+        elementary
+        rot swp push swp
+
+        ++
+    end
+    pop swp pop
+end
+
+proc rule124_println
+    list ->
+do
+    dup .length
+    0 while over over swp < then
+        over(2) over index
+        if
+            "██" print
+        else
+            "  " print
+        end
+        ++
+    end
+    "" println
+    pop pop pop
+end
+
+new_list
+1 push
+
+0 while dup 100 < then
+    swp
+    dup rule124_println
+    0 push
+    0 push
+    rule124
+    swp
+    ++
+end
