@@ -554,16 +554,16 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 block_type_stack.append(info.type_stack.copy())
                 e("spop rax")
                 e("test rax, rax")
-                e("jz label_" + str(tok.value))
+                e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
             case TokenType.ELSE:
                 old_block_type_stack = block_type_stack.pop()
                 block_type_stack.append(info.type_stack.copy())
                 info.type_stack = old_block_type_stack
-                e("jmp label_" + str(tok.value))
-                e("label_" + str(i) + ":")
+                e("jmp " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
+                e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
             case TokenType.WHILE:
                 block_type_stack.append(info.type_stack.copy())
-                e("label_" + str(i) + ":")
+                e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
             case TokenType.THEN:
                 t([PillowType.INT], [])
                 old_block_type_stack = block_type_stack.pop()
@@ -571,7 +571,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 info.type_stack = old_block_type_stack
                 e("spop rax")
                 e("test rax, rax")
-                e("jz label_" + str(tok.value))
+                e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
             case TokenType.END:
                 _, opening_token = next(x for x in code if x[0] == tok.value)
                 old_block_type_stack = block_type_stack.pop()
@@ -582,8 +582,8 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                         assert old_block_type_stack == info.type_stack, f"If else statement must leave the stack the same in both branches\nIf branch got {old_block_type_stack}, else branch got {info.type_stack}"
                     case TokenType.WHILE:
                         assert old_block_type_stack == info.type_stack, f"While loop must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
-                        e("jmp label_" + str(tok.value))
-                e("label_" + str(i) + ":")
+                        e("jmp " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
+                e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
             case _:
                 raise Exception(f"Token type {tok.token_type} not implemented")
 
