@@ -6,6 +6,7 @@ if TARGET = 0
     extrn printf
     extrn malloc
     extrn realloc
+    extrn rand
     section '.text' executable
 
     macro spush value

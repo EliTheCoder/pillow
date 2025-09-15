@@ -246,3 +246,17 @@ export proc ==
 do
     - !
 end
+
+export asm rand
+    -> int
+do
+    "call rand"
+    "spush rax"
+end
+
+export asm exit
+    int ->
+do
+    "spop rdi"
+    "call exit"
+end

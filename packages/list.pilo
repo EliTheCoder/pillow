@@ -82,6 +82,25 @@ do
     + get
 end
 
+export proc assign
+    list int int -> list
+do
+    swp
+    dup over(3) .length >=
+    if
+        "list index " print
+        dup print
+        " is less than length " print
+        over(2) .length print
+        "" println
+        1 exit
+    end
+    8 *
+    over(2) .data +
+    swp
+    set
+end
+
 export proc print
     list ->
 do
@@ -101,4 +120,17 @@ export proc println
 do
     print
     "" println
+end
+
+
+export proc range
+    int -> list
+do
+    new_list swp
+    0 while dup over(2) < then
+        over(2) over push
+        roll(3) pop rot rot
+        ++
+    end
+    pop pop
 end

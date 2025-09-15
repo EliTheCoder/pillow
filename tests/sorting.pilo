@@ -1,0 +1,108 @@
+import(packages/list.pilo)
+
+proc display
+    list ->
+do
+    dup .length --
+    while dup 0 >= then
+        0 while dup over(3) .length < then
+            over(2) over index
+            over(2) >=
+            if "██" else "  " end
+            print
+            ++
+        end
+        pop
+        "" println
+        --
+    end
+    pop pop
+end
+
+proc swap
+    list int int -> list
+do
+    over(2) over(2) index
+    over(3) over(2) index
+    over(4)
+    over(4) over(2) assign
+    over(3) over(3) assign
+    roll(5) roll(5) roll(5) roll(5) roll(5)
+    pop pop pop pop pop
+end
+
+proc shuffle
+    list -> list
+do
+    dup .length --
+    # list i
+    while dup 0 > then
+        rand over %
+        over(2) over(2) over(2)
+        swap pop pop
+        --
+    end
+    pop
+end
+
+proc is_sorted
+    list -> int
+do
+    # list la acc
+    -1
+    0 while dup over(3) .length < over -1 == ! && then
+        over(2) over index
+        dup over(3) <
+        if
+            pop pop -1
+        else
+            rot pop swp ++
+        end
+    end
+    -1 ==
+    if
+        0
+    else
+        1
+    end
+    rot rot pop pop
+end
+
+proc bubble
+    list -> list
+do
+    dup .length
+    0 while dup over(2) -- < then
+        over(2) over
+        over over ++
+        index
+        rot rot
+        index
+        <
+        if
+            over(2) over dup ++
+            swap pop
+            pop dup
+        end
+        ++
+    end
+    pop pop
+end
+
+asm usleep
+    int ->
+do
+    "extrn usleep"
+    "spop rdi"
+    "call usleep"
+end
+
+8 range
+shuffle
+
+while dup is_sorted ! then
+    # bubble
+    shuffle
+    dup display
+    # 50000 usleep
+end

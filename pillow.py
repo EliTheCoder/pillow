@@ -422,6 +422,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             case TokenType.DEBUG:
                 print(info.type_stack)
             case TokenType.DUP:
+                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
                 info.type_stack.append(info.type_stack[-1])
                 e("mov rax, [r12]")
                 e("spush rax")
