@@ -97,12 +97,11 @@ do
     "call usleep"
 end
 
-8 range
+40 range
 shuffle
 
 while dup is_sorted ! then
-    # bubble
-    shuffle
+    bubble
     dup display
-    # 50000 usleep
+    50000 usleep
 end
