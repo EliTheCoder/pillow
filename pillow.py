@@ -16,8 +16,6 @@ class TokenType(Enum):
     STRING = auto()
     DEBUG = auto()
     NAME = auto()
-    DUP = auto()
-    SWP = auto()
     ROLL = auto()
     OVER = auto()
     POP = auto()
@@ -31,7 +29,6 @@ class TokenType(Enum):
     STR_TYPE = auto()
     ARROW = auto()
     DO = auto()
-    DUMP = auto()
     IF = auto()
     ELSE = auto()
     WHILE = auto()
@@ -79,13 +76,12 @@ def lex_token(tok: str, i: int) -> Token:
         comp_value = str(comp_value)
 
     if tok == "?": return Token(TokenType.DEBUG)
-    if tok == "dup": return Token(TokenType.DUP)
-    if tok == "swp": return Token(TokenType.SWP)
+    if tok == "dup": return Token(TokenType.OVER, 0)
+    if tok == "swp": return Token(TokenType.ROLL, 1)
     if tok == "rot": return Token(TokenType.ROLL, 2)
     if tok == "roll": return Token(TokenType.ROLL, int(comp_value or 2))
     if tok == "over": return Token(TokenType.OVER, int(comp_value or 1))
     if tok == "pop": return Token(TokenType.POP)
-    if tok == "dump": return Token(TokenType.DUMP)
     if tok == "int": return Token(TokenType.INT_TYPE)
     if tok == "flo": return Token(TokenType.FLO_TYPE)
     if tok == "str": return Token(TokenType.STR_TYPE)
@@ -421,20 +417,6 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 e("spush " + info.global_prefix + "string_" + str(i))
             case TokenType.DEBUG:
                 print(info.type_stack)
-            case TokenType.DUP:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
-                info.type_stack.append(info.type_stack[-1])
-                e("mov rax, [r12]")
-                e("spush rax")
-            case TokenType.SWP:
-                assert len(info.type_stack) >= 2, f"Instruction {tok} takes 2 items but found {len(info.type_stack)}"
-                takes = info.type_stack[-2:]
-                gives = [takes[1], takes[0]]
-                t(takes, gives)
-                e("spop rax")
-                e("spop rbx")
-                e("spush rax")
-                e("spush rbx")
             case TokenType.ROLL:
                 roll_size = tok.value + 1
                 assert len(info.type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(info.type_stack)}"
@@ -461,23 +443,6 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
                 t([info.type_stack[-1]], [])
                 e("add r12, 8")
-            case TokenType.DUMP:
-                stack_size = len(info.type_stack)
-                for ind in range(stack_size):
-                    offset = (stack_size - 1 - ind) * 8
-                    item_type = info.type_stack[ind]
-                    match item_type:
-                        case PillowType.INT:
-                            e("mov rax, [r12+" + str(offset) + "]")
-                            e("call print_int")
-                        case PillowType.FLO:
-                            e("movq xmm0, [r12+" + str(offset) + "]")
-                            e("call print_flo")
-                        case PillowType.STR:
-                            e("mov rax, [r12+" + str(offset) + "]")
-                            e("call print_str")
-                    e("call print_spc")
-                e("call print_ln")
             case TokenType.NAME:
                 assert tok.value in [procedure.name for procedure in info.procedures if procedure.public or procedure.source_file == info.source_file], f"Undefined procedure {tok.value}"
                 procedure = next((x for x in info.procedures if (x.public or x.source_file == info.source_file) and x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
