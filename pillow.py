@@ -24,9 +24,6 @@ class TokenType(Enum):
     PROC = auto()
     ASM = auto()
     STRUCT = auto()
-    INT_TYPE = auto()
-    FLO_TYPE = auto()
-    STR_TYPE = auto()
     ARROW = auto()
     DO = auto()
     IF = auto()
@@ -34,8 +31,6 @@ class TokenType(Enum):
     WHILE = auto()
     THEN = auto()
     END = auto()
-
-primitives = [TokenType.INT_TYPE, TokenType.FLO_TYPE, TokenType.STR_TYPE]
 
 class Token():
     def __init__(self, token_type: TokenType, value: Any = None):
@@ -45,17 +40,6 @@ class Token():
     def __repr__(self) -> str:
         return self.token_type.name.lower() + (f" {self.value}" if self.value is not None else "")
         
-class PillowType(Enum):
-    INT = auto()
-    FLO = auto()
-    STR = auto()
-    
-    def __repr__(self) -> str:
-        return self.name.lower()
-
-    def __str__(self) -> str:
-        return self.name.lower()
-
 block_stack: list[tuple[int, Token]] = []
 def lex_token(tok: str, i: int) -> Token:
     try:
@@ -82,9 +66,6 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "roll": return Token(TokenType.ROLL, int(comp_value or 2))
     if tok == "over": return Token(TokenType.OVER, int(comp_value or 1))
     if tok == "pop": return Token(TokenType.POP)
-    if tok == "int": return Token(TokenType.INT_TYPE)
-    if tok == "flo": return Token(TokenType.FLO_TYPE)
-    if tok == "str": return Token(TokenType.STR_TYPE)
     if tok == "->": return Token(TokenType.ARROW)
     if tok == "do": return Token(TokenType.DO)
     if tok == "import": return Token(TokenType.IMPORT, comp_value)
@@ -163,9 +144,6 @@ def lex(code: str) -> list[Token]:
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
     return tokens
 
-type GlobalProc = Procedure
-type GlobalType = Union[PillowType, Struct]
-
 def fasm_ident_safe(s: str) -> str:
     out = []
     for ch in s:
@@ -176,7 +154,7 @@ def fasm_ident_safe(s: str) -> str:
     return "".join(out)
 
 class Procedure():
-    def __init__(self, name: str, public: bool, takes: list[GlobalType], gives: list[GlobalType], code: list[tuple[int, Token]], info: EmitInfo):
+    def __init__(self, name: str, public: bool, takes: list[PillowTypeInstance], gives: list[PillowTypeInstance], code: list[tuple[int, Token]], info: EmitInfo):
         self.name = name
         self.public = public
         self.takes = takes
@@ -198,7 +176,7 @@ class Procedure():
                                   include_intrinsics=False,
                                   type_stack=self.takes.copy(),
                                   procedures=info.procedures,
-                                  structs=info.structs)
+                                  types=info.types)
         assembly, data_section = emit(self.code, proc_emit_info)
         exit_stack = proc_emit_info.type_stack
         assert exit_stack == self.gives, f"Procedure {self} does not match type signature\nExpected {self.gives} but got {exit_stack}"
@@ -228,13 +206,13 @@ class AsmProcedure(Procedure):
         return "\n".join([tok.value for _, tok in self.code])
 
 class StructProcedure(Procedure):
-    def __init__(self, struct: Struct, info: EmitInfo):
+    def __init__(self, struct: PillowType, props: dict[str, PillowTypeInstance], info: EmitInfo):
         self.name = struct.name
         self.source_file = info.source_file
         self.struct = struct
         self.public = struct.public
-        self.takes: list[GlobalType] = list(struct.props.values())
-        self.gives: list[GlobalType] = [struct]
+        self.takes: list[PillowTypeInstance] = list(props.values())
+        self.gives: list[PillowTypeInstance] = [struct()]
         self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
@@ -248,11 +226,11 @@ class StructProcedure(Procedure):
         e("mov rbp, rsp")
         match info.target:
             case Target.LINUX:
-                e("mov rdi, " + str(self.struct.size()))
+                e("mov rdi, " + str(self.struct.size))
                 e("call malloc")
             case Target.WINDOWS:
                 e("sub rsp, 0x20")
-                e("mov rcx, " + str(self.struct.size()))
+                e("mov rcx, " + str(self.struct.size))
                 e("call [malloc]")
         for i in reversed(range(0, len(self.takes))):
             e("spop rbx")
@@ -264,14 +242,14 @@ class StructProcedure(Procedure):
         return output, ""
 
 class StructPropProcedure(Procedure):
-    def __init__(self, struct: Struct, prop: str, info: EmitInfo):
+    def __init__(self, struct: PillowType, prop: str, prop_type: PillowTypeInstance, offset: int, info: EmitInfo):
         self.name = "."+prop
         self.source_file = info.source_file
-        self.struct = struct
+        self.offset = offset
         self.public = struct.public
         self.prop = prop
-        self.takes: list[GlobalType] = [struct]
-        self.gives: list[GlobalType] = [struct.props[prop]]
+        self.takes: list[PillowTypeInstance] = [struct()]
+        self.gives: list[PillowTypeInstance] = [prop_type]
         self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
     
     def emit(self, info: EmitInfo) -> tuple[str, str]:
@@ -284,51 +262,34 @@ class StructPropProcedure(Procedure):
         e("push rbp")
         e("mov rbp, rsp")
         e("spop rax")
-        prop_index = list(self.struct.props.keys()).index(self.prop)
-        e("mov rbx, [rax+" + str(prop_index*8) + "]")
+        e("mov rbx, [rax+" + str(self.offset) + "]")
         e("spush rbx")
         e("leave")
         e("ret")
 
         return output, ""
 
-class Struct():
-    def __init__(self, name: str, public: bool, code: list[tuple[int, Token]], info: EmitInfo):
+class PillowType():
+    def __init__(self, name: str, public: bool, size: int, children_count: int = 0):
         self.name = name
-        self.source_file = info.source_file
         self.public = public
-        self.props: dict[str, GlobalType] = {}
+        self.size = size
+        self.children_count = children_count
 
-        toks = [tok for _, tok in code]
-        assert len(toks) % 2 == 0, f"Structs must have name type pairs"
-        pairs = list(zip(toks[::2], toks[1::2]))
-        for prop_name_tok, prop_type_tok in pairs:
-            assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
-            assert prop_type_tok.token_type in [*primitives, TokenType.NAME], f"Expected property type but found {prop_type_tok}"
+    def __call__(self, *children: PillowTypeInstance) -> PillowTypeInstance:
+        return PillowTypeInstance(self, list(children))
 
-            prop_name = prop_name_tok.value
-            assert prop_name not in self.props, f"Struct already has property {prop_name}"
+class PillowTypeInstance():
+    def __init__(self, kind: PillowType, children: list[PillowTypeInstance]):
+        self.kind = kind
+        assert self.kind.children_count == len(children), f"Type {self.kind} expected {self.kind.children_count} children but found {len(children)}"
+        self.children = children
 
-            prop_type: GlobalType
-            match prop_type_tok.token_type:
-                case TokenType.INT_TYPE:
-                    prop_type = PillowType.INT
-                case TokenType.FLO_TYPE:
-                    prop_type = PillowType.FLO
-                case TokenType.STR_TYPE:
-                    prop_type = PillowType.STR
-                case TokenType.NAME:
-                    prop_struct = next((struct for struct in info.structs if struct.name == prop_type_tok.value), None)
-                    assert prop_struct is not None, f"Undefined type {prop_type_tok.value}"
-                    prop_type = prop_struct
-
-            self.props[prop_name] = prop_type
-
-    def size(self) -> int:
-        return len(self.props)*8
-
-    def __repr__(self) -> str:
-        return f"{self.name}"
+class PillowPrimitive:
+    INT = PillowType("int", True, 8)
+    FLO = PillowType("flo", True, 8)
+    CHR = PillowType("chr", True, 1)
+    PTR = PillowType("ptr", True, 8, 1)
 
 class Target(Enum):
     LINUX = auto()
@@ -341,9 +302,10 @@ class EmitInfo():
                  binary: bool = False,
                  global_prefix: str = "",
                  include_intrinsics: bool = True,
-                 type_stack: list[GlobalType] | None = None,
-                 procedures: list[GlobalProc] | None = None,
-                 structs: list[Struct] | None = None,
+                 type_stack: list[PillowTypeInstance] | None = None,
+                 procedures: list[Procedure] | None = None,
+                 types: list[PillowType] | None = None,
+                 imports: list[str] | None = None,
                  ):
         self.source_file = source_file
         self.target = target
@@ -352,12 +314,12 @@ class EmitInfo():
         self.include_intrinsics = include_intrinsics
         self.type_stack = type_stack or []
         self.procedures = procedures or []
-        self.structs = structs or []
+        self.types = types or [PillowPrimitive.INT, PillowPrimitive.FLO, PillowPrimitive.CHR, PillowPrimitive.PTR]
+        self.imports = imports or []
 
 def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     output = ""
     data_section = ""
-    imports: list[str] =  []
 
     def e(x: str) -> None:
         nonlocal output
@@ -367,7 +329,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
         nonlocal data_section
         data_section += x + "\n"
 
-    def type_stack_op(tok: Token, takes: list[GlobalType], gives: list[GlobalType]) -> None:
+    def type_stack_op(tok: Token, takes: list[PillowTypeInstance], gives: list[PillowTypeInstance]) -> None:
         nonlocal info
         if len(takes) > 0:
             assert info.type_stack[-len(takes):] == takes, f"Instruction {tok} takes {takes} but found {info.type_stack[-len(takes):]}"
@@ -388,11 +350,12 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             intrinsics_emit_info = EmitInfo(os.path.abspath("./packages/intrinsics.pilo"), info.target, False, include_intrinsics=False)
             intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read()))), intrinsics_emit_info)
             info.procedures += intrinsics_emit_info.procedures
-            info.structs += intrinsics_emit_info.structs
-            imports.append(os.path.abspath("./packages/intrinsics.pilo"))
+            info.types += intrinsics_emit_info.types
+            info.imports += intrinsics_emit_info.imports
+            info.imports.append(os.path.abspath("./packages/intrinsics.pilo"))
             if info.binary: d(intrinsics_data_section)
 
-    block_type_stack: list[list[GlobalType]] = []
+    block_type_stack: list[list[PillowTypeInstance]] = []
 
     code_iter = iter(code)
 
@@ -400,19 +363,19 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
 
     for i, tok in code_iter:
 
-        def t(takes: list[GlobalType], gives: list[GlobalType]) -> None:
+        def t(takes: list[PillowTypeInstance], gives: list[PillowTypeInstance]) -> None:
             type_stack_op(tok, takes, gives)
         
         match tok.token_type:
             case TokenType.INTEGER:
-                t([], [PillowType.INT])
+                t([], [PillowPrimitive.INT()])
                 e("spush " + str(tok.value))
             case TokenType.FLOAT:
-                t([], [PillowType.FLO])
+                t([], [PillowPrimitive.FLO()])
                 bits, = unpack("<Q", pack("<d", tok.value))
                 e("spush " + hex(bits))
             case TokenType.STRING:
-                t([], [PillowType.STR])
+                t([], [PillowPrimitive.PTR(PillowPrimitive.CHR())])
                 d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
                 e("spush " + info.global_prefix + "string_" + str(i))
             case TokenType.DEBUG:
@@ -452,11 +415,14 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             case TokenType.IMPORT:
                 with open(tok.value, "r") as f:
                     assert not f.closed, f"Could not import file {tok.value}"
-                    import_emit_info = EmitInfo(os.path.abspath(tok.value), info.target, False, tok.value)
+                    abs_path = os.path.abspath(tok.value)
+                    if abs_path in info.imports: break
+                    import_emit_info = EmitInfo(abs_path, info.target, False, tok.value)
                     import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
-                    info.procedures += [p for p in import_emit_info.procedures if p.source_file not in imports]
-                    info.structs += [s for s in import_emit_info.structs if s.source_file not in imports]
-                    imports.append(os.path.abspath(tok.value))
+                    info.procedures += import_emit_info.procedures
+                    info.types += import_emit_info.types
+                    info.imports += import_emit_info.imports
+                    info.imports.append(os.path.abspath(tok.value))
                     d(import_data_section)
             case TokenType.EXPORT:
                 assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
@@ -465,32 +431,26 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 _, proc_name = next(code_iter)
                 assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
                 takes_type = None
-                takes_types: list[GlobalType] = []
+                takes_types: list[PillowTypeInstance] = []
                 while True:
                     _, takes_type = next(code_iter)
                     match takes_type.token_type:
-                        case TokenType.INT_TYPE: takes_types.append(PillowType.INT)
-                        case TokenType.FLO_TYPE: takes_types.append(PillowType.FLO)
-                        case TokenType.STR_TYPE: takes_types.append(PillowType.STR)
                         case TokenType.NAME:
-                            struct = next((x for x in info.structs if x.name == takes_type.value), None)
-                            assert struct is not None, f"Undefined struct {takes_type.value}"
-                            takes_types.append(struct)
+                            kind = next((x for x in info.types if x.name == takes_type.value), None)
+                            assert kind is not None, f"Undefined type {takes_type.value}"
+                            takes_types.append(kind())
                         case TokenType.ARROW: break
                         case _: assert False, f"Expected type or arrow but found {takes_type}"
                 gives_type = None
-                gives_types: list[GlobalType] = []
+                gives_types: list[PillowTypeInstance] = []
                 do_i = 0
                 while True:
                     do_i, gives_type = next(code_iter)
                     match gives_type.token_type:
-                        case TokenType.INT_TYPE: gives_types.append(PillowType.INT)
-                        case TokenType.FLO_TYPE: gives_types.append(PillowType.FLO)
-                        case TokenType.STR_TYPE: gives_types.append(PillowType.STR)
                         case TokenType.NAME:
-                            struct = next((x for x in info.structs if x.name == gives_type.value), None)
-                            assert struct is not None, f"Undefined struct {gives_type.value}"
-                            gives_types.append(struct)
+                            kind = next((x for x in info.types if x.name == gives_type.value), None)
+                            assert kind is not None, f"Undefined struct {gives_type.value}"
+                            gives_types.append(kind())
                         case TokenType.DO: break
                         case _: assert False, f"Expected type or do but found {gives_type}"
                 already_defined_proc = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
@@ -506,17 +466,34 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
             case TokenType.STRUCT:
                 name_i, struct_name = next(code_iter)
                 assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
-                props: dict[str, PillowType] = {}
-                already_defined_struct = next((struct for struct in info.structs if struct.name == struct_name.value), None)
-                new_struct = Struct(struct_name.value, next_public, code[name_i + 1:tok.value], info)
-                info.structs.append(new_struct)
-                info.procedures.append(StructProcedure(new_struct, info))
-                for prop_name, prop_type in new_struct.props.items():
-                    info.procedures.append(StructPropProcedure(new_struct, prop_name, info))
+                already_defined_struct = next((kind for kind in info.types if kind.name == struct_name.value), None)
+                props: dict[str, PillowTypeInstance] = {}
+                toks = [tok for _, tok in code]
+                assert len(toks) % 2 == 0, f"Structs must have name type pairs"
+                pairs = list(zip(toks[::2], toks[1::2]))
+                new_struct = PillowType(struct_name.value, next_public, 8)
+                prop_offset = 0
+                for prop_name_tok, prop_type_tok in pairs:
+                    assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
+                    assert prop_type_tok.token_type == TokenType.NAME, f"Expected property type but found {prop_type_tok}"
+
+                    prop_name = prop_name_tok.value
+                    assert prop_name not in props, f"Struct already has property {prop_name}"
+
+                    prop_type = next((kind for kind in info.types if kind.name == prop_type_tok.value), None)
+                    assert prop_type is not None, f"Undefined type {prop_type_tok.value}"
+
+                    prop_type_instance = prop_type()
+                    props[prop_name] = prop_type_instance
+
+                    info.procedures.append(StructPropProcedure(new_struct, prop_name, prop_type_instance, prop_offset, info))
+                    prop_offset += 8
+                info.types.append(new_struct)
+                info.procedures.append(StructProcedure(new_struct, props, info))
                 while name_i < tok.value: name_i, _ = next(code_iter)
                 next_public = False
             case TokenType.IF:
-                t([PillowType.INT], [])
+                t([PillowPrimitive.INT()], [])
                 block_type_stack.append(info.type_stack.copy())
                 e("spop rax")
                 e("test rax, rax")
@@ -531,7 +508,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                 block_type_stack.append(info.type_stack.copy())
                 e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
             case TokenType.THEN:
-                t([PillowType.INT], [])
+                t([PillowPrimitive.INT()], [])
                 old_block_type_stack = block_type_stack.pop()
                 block_type_stack.append(info.type_stack.copy())
                 info.type_stack = old_block_type_stack
