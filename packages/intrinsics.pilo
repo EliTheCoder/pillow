@@ -213,7 +213,7 @@ do
     "call print_flo"
 end
 export asm print
-    str ->
+    ptr of chr ->
 do
     "spop rax"
     "call print_str"
@@ -236,7 +236,7 @@ do
     print print_ln
 end
 export proc println
-    str ->
+    ptr of chr ->
 do
     print print_ln
 end

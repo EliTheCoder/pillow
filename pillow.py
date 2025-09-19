@@ -8,10 +8,8 @@ from subprocess import run
 from sys import argv, stderr
 from pathlib import Path
 from struct import pack, unpack
-from itertools import tee
+from more_itertools import peekable
 import os
-
-def peek(tee_iterator): return next(tee(tee_iterator, 1)[0])
 
 class TokenType(Enum):
     INTEGER = auto()
@@ -297,11 +295,23 @@ class PillowType():
     def __call__(self, *children: PillowTypeInstance) -> PillowTypeInstance:
         return PillowTypeInstance(self, list(children))
 
+    def __repr__(self) -> str:
+        return self.name.lower()
+
+    def __eq__(self, other) -> bool:
+        return self.name == other.name
+
 class PillowTypeInstance():
     def __init__(self, kind: PillowType, children: list[PillowTypeInstance]):
         self.kind = kind
         assert self.kind.children_count == len(children), f"Type {self.kind} expected {self.kind.children_count} children but found {len(children)}"
         self.children = children
+
+    def __repr__(self) -> str:
+        return f"{self.kind}{" ".join(str(x) for x in self.children)}"
+
+    def __eq__(self, other) -> bool:
+        return self.kind == other.kind and self.children == other.children
 
 class PillowPrimitive:
     INT = PillowType("int", True, 8)
@@ -337,7 +347,6 @@ class EmitInfo():
 
 def parse_type(code: Iterator[tuple[int, Token]], info: EmitInfo) -> PillowTypeInstance:
     _, type_name = next(code)
-    print(f"parse_type: {type_name}")
     assert type_name.token_type == TokenType.NAME, f"Expected type name but found {type_name}"
 
     kind = next((kind for kind in info.types if kind.name == type_name.value), None)
@@ -385,18 +394,18 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     if info.include_intrinsics:
         with open("./packages/intrinsics.pilo", "r") as f:
             assert not f.closed, f"Could not import intrinsics"
-            file_path = os.path.abspath("./packages/intrinsics.pilo")
-            intrinsics_emit_info = EmitInfo(file_path, info.target, False, include_intrinsics=False)
-            intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read(), file_path))), intrinsics_emit_info)
-            info.procedures += intrinsics_emit_info.procedures
+            intrinsics_file_path = os.path.abspath("./packages/intrinsics.pilo")
+            intrinsics_emit_info = EmitInfo(intrinsics_file_path, info.target, False, include_intrinsics=False)
+            intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read(), intrinsics_file_path))), intrinsics_emit_info)
+            info.procedures += [p for p in intrinsics_emit_info.procedures if p.source_file not in info.imports]
             info.types += intrinsics_emit_info.types
             info.imports += intrinsics_emit_info.imports
-            info.imports.append(file_path)
+            info.imports.append(intrinsics_file_path)
             if info.binary: d(intrinsics_data_section)
 
     block_type_stack: list[list[PillowTypeInstance]] = []
 
-    code_iter = iter(code)
+    code_iter = peekable(iter(code))
 
     next_public = False
     for i, tok in code_iter:
@@ -454,10 +463,9 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     with open(tok.value, "r") as f:
                         assert not f.closed, f"Could not import file {tok.value}"
                         abs_path = os.path.abspath(tok.value)
-                        if abs_path in info.imports: break
                         import_emit_info = EmitInfo(abs_path, info.target, False, tok.value)
                         import_assembly, import_data_section = emit(list(enumerate(lex(f.read(), abs_path))), import_emit_info)
-                        info.procedures += import_emit_info.procedures
+                        info.procedures += [p for p in import_emit_info.procedures if p.source_file not in info.imports]
                         info.types += import_emit_info.types
                         info.imports += import_emit_info.imports
                         info.imports.append(os.path.abspath(tok.value))
@@ -471,25 +479,26 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     takes_type = None
                     takes_types: list[PillowTypeInstance] = []
                     while True:
-                        _, takes_token = peek(code_iter)
+                        _, takes_token = code_iter.peek()
                         if takes_token.token_type == TokenType.NAME: takes_types.append(parse_type(code_iter, info))
                         else:
                             assert takes_token.token_type == TokenType.ARROW, f"Expected type or arrow but found {takes_type}"
+                            next(code_iter)
                             break
                     gives_type = None
                     gives_types: list[PillowTypeInstance] = []
                     do_i = 0
                     while True:
-                        do_i, gives_token = peek(code_iter)
-                        print(f"gives peek: {gives_token}, {peek(code_iter)}")
+                        do_i, gives_token = code_iter.peek()
                         if gives_token.token_type == TokenType.NAME: gives_types.append(parse_type(code_iter, info))
                         else:
-                            assert gives_token.token_type == TokenType.DO, f"Expected type or do but found {gives_type}"
+                            next(code_iter)
+                            assert gives_token.token_type == TokenType.DO, f"Expected type or do but found {gives_token}"
                             break
                     already_defined_proc = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
-                    assert already_defined_proc is not None, f"Procedure {already_defined_proc} is already defined"
+                    assert already_defined_proc is None, f"Procedure {already_defined_proc} is already defined"
                     overload_different_takes = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
-                    assert overload_different_takes is not None, f"Procedure {overload_different_takes} takes a different number of items"
+                    assert overload_different_takes is None, f"Procedure {overload_different_takes} takes a different number of items"
                     if tok.token_type == TokenType.PROC:
                         info.procedures.append(Procedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
                     else:
@@ -497,15 +506,15 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     while do_i < tok.value: do_i, _ = next(code_iter)
                     next_public = False
                 case TokenType.STRUCT:
-                    tok_i, struct_name = next(code_iter)
+                    _, struct_name = next(code_iter)
                     assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
                     already_defined_struct = next((kind for kind in info.types if kind.name == struct_name.value), None)
                     assert already_defined_struct is None, f"Struct {struct_name.value} is already defined"
                     props: dict[str, PillowTypeInstance] = {}
                     new_struct = PillowType(struct_name.value, next_public, 8)
                     prop_offset = 0
-                    while tok_i < tok.value:
-                        tok_i, prop_name_tok = next(code_iter)
+                    while code_iter.peek()[0] < tok.value:
+                        _, prop_name_tok = next(code_iter)
                         assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
 
                         prop_name = prop_name_tok.value
@@ -515,6 +524,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
 
                         info.procedures.append(StructPropProcedure(new_struct, prop_name, props[prop_name], prop_offset, info))
                         prop_offset += 8
+                    next(code_iter)
                     info.types.append(new_struct)
                     info.procedures.append(StructProcedure(new_struct, props, info))
                     next_public = False
@@ -543,6 +553,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
                 case TokenType.END:
                     _, opening_token = next(x for x in code if x[0] == tok.value)
+                    assert len(block_type_stack) != 0, f"Mismatched end"
                     old_block_type_stack = block_type_stack.pop()
                     match opening_token.token_type:
                         case TokenType.IF:
@@ -555,7 +566,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
                 case _:
                     raise Exception(f"Token type {tok.token_type} not implemented")
-        except Exception as exception:
+        except AssertionError as exception:
             print(f"Error at {tok.filename}:{tok.line_number}:{tok.column_number}: {exception}", file=stderr)
             exit(1)
 
