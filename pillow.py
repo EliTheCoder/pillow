@@ -24,6 +24,7 @@ class TokenType(Enum):
     EXPORT = auto()
     PROC = auto()
     ASM = auto()
+    EXTERN = auto()
     STRUCT = auto()
     ARROW = auto()
     OF = auto()
@@ -91,6 +92,10 @@ def lex_token(tok: str, i: int) -> Token:
         return token
     if tok == "asm":
         token = Token(TokenType.ASM)
+        block_stack.append((i, token))
+        return token
+    if tok == "extern":
+        token = Token(TokenType.EXTERN)
         block_stack.append((i, token))
         return token
     if tok == "if":
@@ -221,6 +226,23 @@ class AsmProcedure(Procedure):
 
         return "\n".join([tok.value for _, tok in self.code])
 
+class ExternProcedure(Procedure):
+    def __init__(self, name: str, public: bool, takes: list[PillowTypeInstance], gives: list[PillowTypeInstance], code: str, info: EmitInfo):
+        self.name = name
+        self.public = public
+        self.takes = takes
+        self.gives = gives
+        self.output = code
+        self.source_file = info.source_file
+        self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
+
+    def emit(self, info: EmitInfo) -> tuple[str, str]:
+        return f"extrn {self.name}\n", ""
+
+    def call(self) -> str:
+        return self.output
+
+
 class StructProcedure(Procedure):
     def __init__(self, struct: PillowType, props: dict[str, PillowTypeInstance], info: EmitInfo):
         self.name = struct.name
@@ -298,7 +320,9 @@ class PillowType():
     def __repr__(self) -> str:
         return self.name.lower()
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PillowType):
+            return NotImplemented
         return self.name == other.name
 
 class PillowTypeInstance():
@@ -310,7 +334,9 @@ class PillowTypeInstance():
     def __repr__(self) -> str:
         return f"{self.kind}{" ".join(str(x) for x in self.children)}"
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PillowTypeInstance):
+            return NotImplemented
         return self.kind == other.kind and self.children == other.children
 
 class PillowPrimitive:
@@ -362,6 +388,24 @@ def parse_type(code: Iterator[tuple[int, Token]], info: EmitInfo) -> PillowTypeI
         children_types.append(parse_type(code, info))
 
     return kind(*children_types)
+
+def parse_parameters(code: peekable[tuple[int, Token]], info: EmitInfo) -> tuple[list[PillowTypeInstance], list[PillowTypeInstance]]:
+    takes_type = None
+    takes_types: list[PillowTypeInstance] = []
+    while True:
+        _, takes_token = code.peek()
+        if takes_token.token_type == TokenType.NAME: takes_types.append(parse_type(code, info))
+        else:
+            assert takes_token.token_type == TokenType.ARROW, f"Expected type or arrow but found {takes_type}"
+            break
+    next(code)
+    gives_type = None
+    gives_types: list[PillowTypeInstance] = []
+    while True:
+        _, gives_token = code.peek()
+        if gives_token.token_type == TokenType.NAME: gives_types.append(parse_type(code, info))
+        else: break
+    return takes_types, gives_types
 
 
 def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
@@ -471,39 +515,50 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                         info.imports.append(os.path.abspath(tok.value))
                         d(import_data_section)
                 case TokenType.EXPORT:
-                    assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
+                    assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.EXTERN, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
                     next_public = True
                 case TokenType.PROC | TokenType.ASM:
                     _, proc_name = next(code_iter)
                     assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
-                    takes_type = None
-                    takes_types: list[PillowTypeInstance] = []
-                    while True:
-                        _, takes_token = code_iter.peek()
-                        if takes_token.token_type == TokenType.NAME: takes_types.append(parse_type(code_iter, info))
-                        else:
-                            assert takes_token.token_type == TokenType.ARROW, f"Expected type or arrow but found {takes_type}"
-                            next(code_iter)
-                            break
-                    gives_type = None
-                    gives_types: list[PillowTypeInstance] = []
-                    do_i = 0
-                    while True:
-                        do_i, gives_token = code_iter.peek()
-                        if gives_token.token_type == TokenType.NAME: gives_types.append(parse_type(code_iter, info))
-                        else:
-                            next(code_iter)
-                            assert gives_token.token_type == TokenType.DO, f"Expected type or do but found {gives_token}"
-                            break
+                    takes_types, gives_types = parse_parameters(code_iter, info)
                     already_defined_proc = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
                     assert already_defined_proc is None, f"Procedure {already_defined_proc} is already defined"
                     overload_different_takes = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
                     assert overload_different_takes is None, f"Procedure {overload_different_takes} takes a different number of items"
+                    do_i, do_token = next(code_iter)
+                    assert do_token.token_type == TokenType.DO, f"Expected do after parameters but found {do_token}"
                     if tok.token_type == TokenType.PROC:
                         info.procedures.append(Procedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
                     else:
                         info.procedures.append(AsmProcedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
                     while do_i < tok.value: do_i, _ = next(code_iter)
+                    next_public = False
+                case TokenType.EXTERN:
+                    _, extern_name = next(code_iter)
+                    assert extern_name.token_type == TokenType.NAME, f"Expected extern name but found {extern_name}"
+                    already_defined_extern = next((kind for kind in info.types if kind.name == extern_name.value), None)
+                    assert already_defined_extern is None, f"Procedure {extern_name.value} is already defined"
+                    takes_types, gives_types = parse_parameters(code_iter, info)
+                    _, end_token = next(code_iter)
+                    assert end_token.token_type == TokenType.END, f"Expected end after parameters but found {end_token}"
+                    assert len(gives_types) <= 1, f"Extern procedures can only have one return value"
+                    param_registers = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+                    return_register = "rax"
+                    flo_param_registers = ["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"]
+                    flo_return_register = "xmm0"
+                    assembly = ""
+                    for takes_type in takes_types:
+                        if takes_type.kind == PillowPrimitive.FLO:
+                            assembly = f"spop {flo_param_registers.pop(0)}\n" + assembly
+                        else:
+                            assembly = f"spop {param_registers.pop(0)}\n" + assembly
+                    assembly += f"call {extern_name.value}\n"
+                    if len(gives_types) > 0:
+                        if gives_types[0].kind == PillowPrimitive.FLO:
+                            assembly += f"spush {flo_return_register}\n"
+                        else:
+                            assembly += f"spush {return_register}\n"
+                    info.procedures.append(ExternProcedure(extern_name.value, next_public, takes_types, gives_types, assembly, info))
                     next_public = False
                 case TokenType.STRUCT:
                     _, struct_name = next(code_iter)
