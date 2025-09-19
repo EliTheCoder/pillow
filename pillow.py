@@ -205,6 +205,7 @@ class Procedure():
         e(self.proc_name + ":")
         e("push rbp")
         e("mov rbp, rsp")
+        e("and rsp, -16")
         e(assembly)
         e("leave")
         e("ret")
@@ -237,7 +238,7 @@ class ExternProcedure(Procedure):
         self.proc_name = fasm_ident_safe(info.global_prefix) + "_proc_" + fasm_ident_safe(self.name) + "".join("_" + str(x) for x in self.takes)
 
     def emit(self, info: EmitInfo) -> tuple[str, str]:
-        return f"extrn {self.name}\n", ""
+        return f"if ~ definite ext_{self.name}\nextrn {self.name}\nend if\next_{self.name} = 1\n", ""
 
     def call(self) -> str:
         return self.output
@@ -467,7 +468,7 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     e("spush " + hex(bits))
                 case TokenType.STRING:
                     t([], [PillowPrimitive.PTR(PillowPrimitive.CHR())])
-                    d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
+                    d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value.replace("\\n", "\", 10, \"") + "\", 0")
                     e("spush " + info.global_prefix + "string_" + str(i))
                 case TokenType.DEBUG:
                     print(info.type_stack)
@@ -546,16 +547,19 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
                     return_register = "rax"
                     flo_param_registers = ["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"]
                     flo_return_register = "xmm0"
+                    fp_args = 0
                     assembly = ""
                     for takes_type in takes_types:
                         if takes_type.kind == PillowPrimitive.FLO:
-                            assembly = f"spop {flo_param_registers.pop(0)}\n" + assembly
+                            fp_args += 1
+                            assembly = f"spopsd {flo_param_registers.pop(0)}\n" + assembly
                         else:
                             assembly = f"spop {param_registers.pop(0)}\n" + assembly
+                    assembly += f"mov al, {fp_args}\n"
                     assembly += f"call {extern_name.value}\n"
                     if len(gives_types) > 0:
                         if gives_types[0].kind == PillowPrimitive.FLO:
-                            assembly += f"spush {flo_return_register}\n"
+                            assembly += f"spushsd {flo_return_register}\n"
                         else:
                             assembly += f"spush {return_register}\n"
                     info.procedures.append(ExternProcedure(extern_name.value, next_public, takes_types, gives_types, assembly, info))

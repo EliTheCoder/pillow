@@ -3,10 +3,7 @@ if TARGET = 0
 
     public main
     extrn exit
-    extrn printf
     extrn malloc
-    extrn realloc
-    extrn rand
     section '.text' executable
 
     macro spush value

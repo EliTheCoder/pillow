@@ -200,29 +200,47 @@ do
     "spush rax"
 end
 
-export asm print
-    int ->
-do
-    "spop rax"
-    "call print_int"
-end
-export asm print
-    flo ->
-do
-    "spopsd xmm0"
-    "call print_flo"
-end
-export asm print
-    ptr of chr ->
-do
-    "spop rax"
-    "call print_str"
+extern printf
+    ptr of chr
+    int
+    ->
+    int
 end
 
-asm print_ln
+extern printf
+    ptr of chr
+    flo
+    ->
+    int
+end
+
+extern printf
+    ptr of chr
+    ptr of chr
+    ->
+    int
+end
+
+export proc print
+    int ->
+do
+    "%d" swp printf pop
+end
+export proc print
+    flo ->
+do
+    "%g" swp printf pop
+end
+export proc print
+    ptr of chr ->
+do
+    "%s" swp printf pop
+end
+
+proc print_ln
     ->
 do
-    "call print_ln"
+    "\n" "" printf pop
 end
 
 export proc println
