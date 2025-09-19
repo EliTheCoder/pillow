@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
-import subprocess
+from subprocess import run
+from sys import stderr, executable
 import os
-import sys
 
-result_a = subprocess.run([sys.executable, "pillow.py", "test.pilo"])
-assert result_a.returncode == 0
-result_b = subprocess.run(["test.exe" if os.name == "nt" else "./test"], capture_output = True, text = True)
+result_a = run([executable, "pillow.py", "test.pilo"])
+if result_a.returncode != 0:
+    print("Failed to compile test.pilo", file=stderr)
+    exit(1)
+result_b = run(["test.exe" if os.name == "nt" else "./test"], capture_output = True, text = True)
 
 expected_output = """4
 0

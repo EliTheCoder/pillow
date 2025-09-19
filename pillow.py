@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 from enum import Enum, auto
-from typing import Any, Union
+from typing import Any, Iterator, Union
 from re import fullmatch
 from subprocess import run
-from sys import argv
+from sys import argv, stderr
 from pathlib import Path
 from struct import pack, unpack
+from itertools import tee
 import os
+
+def peek(tee_iterator): return next(tee(tee_iterator, 1)[0])
 
 class TokenType(Enum):
     INTEGER = auto()
@@ -25,6 +28,7 @@ class TokenType(Enum):
     ASM = auto()
     STRUCT = auto()
     ARROW = auto()
+    OF = auto()
     DO = auto()
     IF = auto()
     ELSE = auto()
@@ -36,20 +40,28 @@ class Token():
     def __init__(self, token_type: TokenType, value: Any = None):
         self.token_type = token_type
         self.value = value
+        self.filename: str | None
+        self.line_number: int | None
+        self.column_number: int | None
+    
+    def location(self, filename: str, line_number: int, column_number: int) -> Token:
+        self.filename = filename
+        self.line_number = line_number
+        self.column_number = column_number
+        return self
 
     def __repr__(self) -> str:
         return self.token_type.name.lower() + (f" {self.value}" if self.value is not None else "")
         
 block_stack: list[tuple[int, Token]] = []
 def lex_token(tok: str, i: int) -> Token:
-    try:
-        return Token(TokenType.INTEGER, int(tok))
-    except ValueError:
-        pass
-    try:
-        return Token(TokenType.FLOAT, float(tok))
-    except ValueError:
-        pass
+
+    try: return Token(TokenType.INTEGER, int(tok))
+    except ValueError: pass
+
+    try: return Token(TokenType.FLOAT, float(tok))
+    except ValueError: pass
+
     if tok.startswith("\"") and tok.endswith("\""): return Token(TokenType.STRING, tok[1:-1])
     tok = tok.lower()
     comp_value = None
@@ -67,6 +79,7 @@ def lex_token(tok: str, i: int) -> Token:
     if tok == "over": return Token(TokenType.OVER, int(comp_value or 1))
     if tok == "pop": return Token(TokenType.POP)
     if tok == "->": return Token(TokenType.ARROW)
+    if tok == "of": return Token(TokenType.OF)
     if tok == "do": return Token(TokenType.DO)
     if tok == "import": return Token(TokenType.IMPORT, comp_value)
     if tok == "export": return Token(TokenType.EXPORT)
@@ -114,11 +127,16 @@ def lex_token(tok: str, i: int) -> Token:
         return Token(TokenType.END, opening_i)
     return Token(TokenType.NAME, tok)
 
-def lex(code: str) -> list[Token]:
+def lex(code: str, filename: str) -> list[Token]:
     tokens: list[Token] = []
     i = 0
+    line_number = 1
+    column_start = 0
     while i < len(code):
         if code[i].isspace():
+            if code[i] == "\n":
+                line_number += 1
+                column_start = i
             i += 1
             continue
         if code[i] == "\"":
@@ -127,7 +145,7 @@ def lex(code: str) -> list[Token]:
             while i < len(code) and (code[i] != "\"" or code[i - 1] == "\\"):
                 i += 1
             i += 1
-            tokens.append(lex_token(code[start:i], len(tokens)))
+            tokens.append(lex_token(code[start:i], len(tokens)).location(filename, line_number, i - column_start + 1))
             continue
         if code[i] == "#":
             while i < len(code) and code[i] != "\n":
@@ -140,7 +158,7 @@ def lex(code: str) -> list[Token]:
                     i += 1
                 assert code[i] == ")", f"Mismatched parenthesis"
             i += 1
-        tokens.append(lex_token(code[start:i], len(tokens)))
+        tokens.append(lex_token(code[start:i], len(tokens)).location(filename, line_number, i - column_start + 1))
     assert len(block_stack) == 0, f"Mismatched {block_stack[-1]}"
     return tokens
 
@@ -317,6 +335,26 @@ class EmitInfo():
         self.types = types or [PillowPrimitive.INT, PillowPrimitive.FLO, PillowPrimitive.CHR, PillowPrimitive.PTR]
         self.imports = imports or []
 
+def parse_type(code: Iterator[tuple[int, Token]], info: EmitInfo) -> PillowTypeInstance:
+    _, type_name = next(code)
+    print(f"parse_type: {type_name}")
+    assert type_name.token_type == TokenType.NAME, f"Expected type name but found {type_name}"
+
+    kind = next((kind for kind in info.types if kind.name == type_name.value), None)
+    assert kind is not None, f"Undefined type {type_name.value}"
+
+    if kind.children_count == 0: return kind()
+
+    _, of_token = next(code)
+    assert of_token.token_type == TokenType.OF, f"Expected of after type {kind}"
+
+    children_types: list[PillowTypeInstance] = []
+    for _ in range(kind.children_count):
+        children_types.append(parse_type(code, info))
+
+    return kind(*children_types)
+
+
 def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     output = ""
     data_section = ""
@@ -347,12 +385,13 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     if info.include_intrinsics:
         with open("./packages/intrinsics.pilo", "r") as f:
             assert not f.closed, f"Could not import intrinsics"
-            intrinsics_emit_info = EmitInfo(os.path.abspath("./packages/intrinsics.pilo"), info.target, False, include_intrinsics=False)
-            intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read()))), intrinsics_emit_info)
+            file_path = os.path.abspath("./packages/intrinsics.pilo")
+            intrinsics_emit_info = EmitInfo(file_path, info.target, False, include_intrinsics=False)
+            intrinsics_assembly, intrinsics_data_section = emit(list(enumerate(lex(f.read(), file_path))), intrinsics_emit_info)
             info.procedures += intrinsics_emit_info.procedures
             info.types += intrinsics_emit_info.types
             info.imports += intrinsics_emit_info.imports
-            info.imports.append(os.path.abspath("./packages/intrinsics.pilo"))
+            info.imports.append(file_path)
             if info.binary: d(intrinsics_data_section)
 
     block_type_stack: list[list[PillowTypeInstance]] = []
@@ -360,175 +399,165 @@ def emit(code: list[tuple[int, Token]], info: EmitInfo) -> tuple[str, str]:
     code_iter = iter(code)
 
     next_public = False
-
     for i, tok in code_iter:
-
-        def t(takes: list[PillowTypeInstance], gives: list[PillowTypeInstance]) -> None:
-            type_stack_op(tok, takes, gives)
-        
-        match tok.token_type:
-            case TokenType.INTEGER:
-                t([], [PillowPrimitive.INT()])
-                e("spush " + str(tok.value))
-            case TokenType.FLOAT:
-                t([], [PillowPrimitive.FLO()])
-                bits, = unpack("<Q", pack("<d", tok.value))
-                e("spush " + hex(bits))
-            case TokenType.STRING:
-                t([], [PillowPrimitive.PTR(PillowPrimitive.CHR())])
-                d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
-                e("spush " + info.global_prefix + "string_" + str(i))
-            case TokenType.DEBUG:
-                print(info.type_stack)
-            case TokenType.ROLL:
-                roll_size = tok.value + 1
-                assert len(info.type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(info.type_stack)}"
-                takes = info.type_stack[-roll_size:]
-                gives = [*takes[1:], takes[0]]
-                t(takes, gives)
-                for _ in range(roll_size-1):
-                    e("spop rax")
-                    e("push rax")
-                e("spop rbx")
-                for _ in range(roll_size-1):
-                    e("pop rax")
+        try:
+            def t(takes: list[PillowTypeInstance], gives: list[PillowTypeInstance]) -> None:
+                type_stack_op(tok, takes, gives)
+            
+            match tok.token_type:
+                case TokenType.INTEGER:
+                    t([], [PillowPrimitive.INT()])
+                    e("spush " + str(tok.value))
+                case TokenType.FLOAT:
+                    t([], [PillowPrimitive.FLO()])
+                    bits, = unpack("<Q", pack("<d", tok.value))
+                    e("spush " + hex(bits))
+                case TokenType.STRING:
+                    t([], [PillowPrimitive.PTR(PillowPrimitive.CHR())])
+                    d(info.global_prefix + "string_" + str(i) + " db \"" + tok.value + "\", 0")
+                    e("spush " + info.global_prefix + "string_" + str(i))
+                case TokenType.DEBUG:
+                    print(info.type_stack)
+                case TokenType.ROLL:
+                    roll_size = tok.value + 1
+                    assert len(info.type_stack) >= roll_size, f"Instruction {tok} takes {roll_size} items but found {len(info.type_stack)}"
+                    takes = info.type_stack[-roll_size:]
+                    gives = [*takes[1:], takes[0]]
+                    t(takes, gives)
+                    for _ in range(roll_size-1):
+                        e("spop rax")
+                        e("push rax")
+                    e("spop rbx")
+                    for _ in range(roll_size-1):
+                        e("pop rax")
+                        e("spush rax")
+                    e("spush rbx")
+                case TokenType.OVER:
+                    over_size = tok.value + 1
+                    assert len(info.type_stack) >= over_size, f"Instruction {tok} takes {over_size} items but found {len(info.type_stack)}"
+                    takes = info.type_stack[-over_size:]
+                    gives = [*takes, takes[0]]
+                    t(takes, gives)
+                    e("mov rax, [r12+" + str(8*(over_size-1)) + "]")
                     e("spush rax")
-                e("spush rbx")
-            case TokenType.OVER:
-                over_size = tok.value + 1
-                assert len(info.type_stack) >= over_size, f"Instruction {tok} takes {over_size} items but found {len(info.type_stack)}"
-                takes = info.type_stack[-over_size:]
-                gives = [*takes, takes[0]]
-                t(takes, gives)
-                e("mov rax, [r12+" + str(8*(over_size-1)) + "]")
-                e("spush rax")
-            case TokenType.POP:
-                assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
-                t([info.type_stack[-1]], [])
-                e("add r12, 8")
-            case TokenType.NAME:
-                assert tok.value in [procedure.name for procedure in info.procedures if procedure.public or procedure.source_file == info.source_file], f"Undefined procedure {tok.value}"
-                procedure = next((x for x in info.procedures if (x.public or x.source_file == info.source_file) and x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
-                assert procedure is not None, f"No overload for {tok.value} matches {info.type_stack}"
-                t(procedure.takes, procedure.gives)
-                e(procedure.call())
-            case TokenType.IMPORT:
-                with open(tok.value, "r") as f:
-                    assert not f.closed, f"Could not import file {tok.value}"
-                    abs_path = os.path.abspath(tok.value)
-                    if abs_path in info.imports: break
-                    import_emit_info = EmitInfo(abs_path, info.target, False, tok.value)
-                    import_assembly, import_data_section = emit(list(enumerate(lex(f.read()))), import_emit_info)
-                    info.procedures += import_emit_info.procedures
-                    info.types += import_emit_info.types
-                    info.imports += import_emit_info.imports
-                    info.imports.append(os.path.abspath(tok.value))
-                    d(import_data_section)
-            case TokenType.EXPORT:
-                assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
-                next_public = True
-            case TokenType.PROC | TokenType.ASM:
-                _, proc_name = next(code_iter)
-                assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
-                takes_type = None
-                takes_types: list[PillowTypeInstance] = []
-                while True:
-                    _, takes_type = next(code_iter)
-                    match takes_type.token_type:
-                        case TokenType.NAME:
-                            kind = next((x for x in info.types if x.name == takes_type.value), None)
-                            assert kind is not None, f"Undefined type {takes_type.value}"
-                            takes_types.append(kind())
-                        case TokenType.ARROW: break
-                        case _: assert False, f"Expected type or arrow but found {takes_type}"
-                gives_type = None
-                gives_types: list[PillowTypeInstance] = []
-                do_i = 0
-                while True:
-                    do_i, gives_type = next(code_iter)
-                    match gives_type.token_type:
-                        case TokenType.NAME:
-                            kind = next((x for x in info.types if x.name == gives_type.value), None)
-                            assert kind is not None, f"Undefined struct {gives_type.value}"
-                            gives_types.append(kind())
-                        case TokenType.DO: break
-                        case _: assert False, f"Expected type or do but found {gives_type}"
-                already_defined_proc = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
-                if already_defined_proc is not None: assert False, f"Procedure {already_defined_proc} is already defined"
-                overload_different_takes = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
-                if overload_different_takes is not None: assert False, f"Procedure {overload_different_takes} takes a different number of items"
-                if tok.token_type == TokenType.PROC:
-                    info.procedures.append(Procedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
-                else:
-                    info.procedures.append(AsmProcedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
-                while do_i < tok.value: do_i, _ = next(code_iter)
-                next_public = False
-            case TokenType.STRUCT:
-                name_i, struct_name = next(code_iter)
-                assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
-                already_defined_struct = next((kind for kind in info.types if kind.name == struct_name.value), None)
-                props: dict[str, PillowTypeInstance] = {}
-                toks = [tok for _, tok in code]
-                assert len(toks) % 2 == 0, f"Structs must have name type pairs"
-                pairs = list(zip(toks[::2], toks[1::2]))
-                new_struct = PillowType(struct_name.value, next_public, 8)
-                prop_offset = 0
-                for prop_name_tok, prop_type_tok in pairs:
-                    assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
-                    assert prop_type_tok.token_type == TokenType.NAME, f"Expected property type but found {prop_type_tok}"
+                case TokenType.POP:
+                    assert len(info.type_stack) >= 1, f"Instruction {tok} takes 1 item but found {len(info.type_stack)}"
+                    t([info.type_stack[-1]], [])
+                    e("add r12, 8")
+                case TokenType.NAME:
+                    assert tok.value in [procedure.name for procedure in info.procedures if procedure.public or procedure.source_file == info.source_file], f"Undefined procedure {tok.value}"
+                    procedure = next((x for x in info.procedures if (x.public or x.source_file == info.source_file) and x.name == tok.value and (info.type_stack[-len(x.takes):] == x.takes or len(x.takes) == 0)), None)
+                    assert procedure is not None, f"No overload for {tok.value} matches {info.type_stack}"
+                    t(procedure.takes, procedure.gives)
+                    e(procedure.call())
+                case TokenType.IMPORT:
+                    with open(tok.value, "r") as f:
+                        assert not f.closed, f"Could not import file {tok.value}"
+                        abs_path = os.path.abspath(tok.value)
+                        if abs_path in info.imports: break
+                        import_emit_info = EmitInfo(abs_path, info.target, False, tok.value)
+                        import_assembly, import_data_section = emit(list(enumerate(lex(f.read(), abs_path))), import_emit_info)
+                        info.procedures += import_emit_info.procedures
+                        info.types += import_emit_info.types
+                        info.imports += import_emit_info.imports
+                        info.imports.append(os.path.abspath(tok.value))
+                        d(import_data_section)
+                case TokenType.EXPORT:
+                    assert code[i+1][1].token_type in [TokenType.PROC, TokenType.ASM, TokenType.STRUCT], f"Export must be followed by proc, asm, or struct"
+                    next_public = True
+                case TokenType.PROC | TokenType.ASM:
+                    _, proc_name = next(code_iter)
+                    assert proc_name.token_type == TokenType.NAME, f"Expected procedure name but found {proc_name}"
+                    takes_type = None
+                    takes_types: list[PillowTypeInstance] = []
+                    while True:
+                        _, takes_token = peek(code_iter)
+                        if takes_token.token_type == TokenType.NAME: takes_types.append(parse_type(code_iter, info))
+                        else:
+                            assert takes_token.token_type == TokenType.ARROW, f"Expected type or arrow but found {takes_type}"
+                            break
+                    gives_type = None
+                    gives_types: list[PillowTypeInstance] = []
+                    do_i = 0
+                    while True:
+                        do_i, gives_token = peek(code_iter)
+                        print(f"gives peek: {gives_token}, {peek(code_iter)}")
+                        if gives_token.token_type == TokenType.NAME: gives_types.append(parse_type(code_iter, info))
+                        else:
+                            assert gives_token.token_type == TokenType.DO, f"Expected type or do but found {gives_type}"
+                            break
+                    already_defined_proc = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and procedure.takes == takes_types and procedure.gives == gives_types), None)
+                    assert already_defined_proc is not None, f"Procedure {already_defined_proc} is already defined"
+                    overload_different_takes = next((procedure for procedure in info.procedures if procedure.name == proc_name.value and len(procedure.takes) != len(takes_types)), None)
+                    assert overload_different_takes is not None, f"Procedure {overload_different_takes} takes a different number of items"
+                    if tok.token_type == TokenType.PROC:
+                        info.procedures.append(Procedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
+                    else:
+                        info.procedures.append(AsmProcedure(proc_name.value, next_public, takes_types, gives_types, code[do_i + 1:tok.value], info))
+                    while do_i < tok.value: do_i, _ = next(code_iter)
+                    next_public = False
+                case TokenType.STRUCT:
+                    tok_i, struct_name = next(code_iter)
+                    assert struct_name.token_type == TokenType.NAME, f"Expected struct name but found {struct_name}"
+                    already_defined_struct = next((kind for kind in info.types if kind.name == struct_name.value), None)
+                    assert already_defined_struct is None, f"Struct {struct_name.value} is already defined"
+                    props: dict[str, PillowTypeInstance] = {}
+                    new_struct = PillowType(struct_name.value, next_public, 8)
+                    prop_offset = 0
+                    while tok_i < tok.value:
+                        tok_i, prop_name_tok = next(code_iter)
+                        assert prop_name_tok.token_type == TokenType.NAME, f"Expected property name but found {prop_name_tok}"
 
-                    prop_name = prop_name_tok.value
-                    assert prop_name not in props, f"Struct already has property {prop_name}"
+                        prop_name = prop_name_tok.value
+                        assert prop_name not in props, f"Struct already has property {prop_name}"
 
-                    prop_type = next((kind for kind in info.types if kind.name == prop_type_tok.value), None)
-                    assert prop_type is not None, f"Undefined type {prop_type_tok.value}"
+                        props[prop_name] = parse_type(code_iter, info)
 
-                    prop_type_instance = prop_type()
-                    props[prop_name] = prop_type_instance
-
-                    info.procedures.append(StructPropProcedure(new_struct, prop_name, prop_type_instance, prop_offset, info))
-                    prop_offset += 8
-                info.types.append(new_struct)
-                info.procedures.append(StructProcedure(new_struct, props, info))
-                while name_i < tok.value: name_i, _ = next(code_iter)
-                next_public = False
-            case TokenType.IF:
-                t([PillowPrimitive.INT()], [])
-                block_type_stack.append(info.type_stack.copy())
-                e("spop rax")
-                e("test rax, rax")
-                e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
-            case TokenType.ELSE:
-                old_block_type_stack = block_type_stack.pop()
-                block_type_stack.append(info.type_stack.copy())
-                info.type_stack = old_block_type_stack
-                e("jmp " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
-                e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
-            case TokenType.WHILE:
-                block_type_stack.append(info.type_stack.copy())
-                e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
-            case TokenType.THEN:
-                t([PillowPrimitive.INT()], [])
-                old_block_type_stack = block_type_stack.pop()
-                block_type_stack.append(info.type_stack.copy())
-                info.type_stack = old_block_type_stack
-                e("spop rax")
-                e("test rax, rax")
-                e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
-            case TokenType.END:
-                _, opening_token = next(x for x in code if x[0] == tok.value)
-                old_block_type_stack = block_type_stack.pop()
-                match opening_token.token_type:
-                    case TokenType.IF:
-                        assert old_block_type_stack == info.type_stack, f"If statement must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
-                    case TokenType.ELSE:
-                        assert old_block_type_stack == info.type_stack, f"If else statement must leave the stack the same in both branches\nIf branch got {old_block_type_stack}, else branch got {info.type_stack}"
-                    case TokenType.WHILE:
-                        assert old_block_type_stack == info.type_stack, f"While loop must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
-                        e("jmp " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
-                e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
-            case _:
-                raise Exception(f"Token type {tok.token_type} not implemented")
+                        info.procedures.append(StructPropProcedure(new_struct, prop_name, props[prop_name], prop_offset, info))
+                        prop_offset += 8
+                    info.types.append(new_struct)
+                    info.procedures.append(StructProcedure(new_struct, props, info))
+                    next_public = False
+                case TokenType.IF:
+                    t([PillowPrimitive.INT()], [])
+                    block_type_stack.append(info.type_stack.copy())
+                    e("spop rax")
+                    e("test rax, rax")
+                    e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
+                case TokenType.ELSE:
+                    old_block_type_stack = block_type_stack.pop()
+                    block_type_stack.append(info.type_stack.copy())
+                    info.type_stack = old_block_type_stack
+                    e("jmp " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
+                    e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
+                case TokenType.WHILE:
+                    block_type_stack.append(info.type_stack.copy())
+                    e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
+                case TokenType.THEN:
+                    t([PillowPrimitive.INT()], [])
+                    old_block_type_stack = block_type_stack.pop()
+                    block_type_stack.append(info.type_stack.copy())
+                    info.type_stack = old_block_type_stack
+                    e("spop rax")
+                    e("test rax, rax")
+                    e("jz " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
+                case TokenType.END:
+                    _, opening_token = next(x for x in code if x[0] == tok.value)
+                    old_block_type_stack = block_type_stack.pop()
+                    match opening_token.token_type:
+                        case TokenType.IF:
+                            assert old_block_type_stack == info.type_stack, f"If statement must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
+                        case TokenType.ELSE:
+                            assert old_block_type_stack == info.type_stack, f"If else statement must leave the stack the same in both branches\nIf branch got {old_block_type_stack}, else branch got {info.type_stack}"
+                        case TokenType.WHILE:
+                            assert old_block_type_stack == info.type_stack, f"While loop must leave the stack the same as before\nStarted with {old_block_type_stack} and got {info.type_stack}"
+                            e("jmp " + fasm_ident_safe(info.source_file) + "_label_" + str(tok.value))
+                    e(fasm_ident_safe(info.source_file) + "_label_" + str(i) + ":")
+                case _:
+                    raise Exception(f"Token type {tok.token_type} not implemented")
+        except Exception as exception:
+            print(f"Error at {tok.filename}:{tok.line_number}:{tok.column_number}: {exception}", file=stderr)
+            exit(1)
 
     if info.binary:
         e("jmp pillow_exit")
@@ -565,7 +594,8 @@ def main() -> None:
         if f.closed:
             print(f"Could not open file {argv[-1]} for reading")
             exit(1)
-        assembly, _ = emit(list(enumerate(lex(f.read()))), EmitInfo(os.path.abspath(argv[-1]), target, True, procedures=[]))
+        abs_path = os.path.abspath(argv[-1])
+        assembly, _ = emit(list(enumerate(lex(f.read(), abs_path))), EmitInfo(abs_path, target, True, procedures=[]))
         compile(assembly, target, output_file)
 
 
